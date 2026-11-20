@@ -83,6 +83,9 @@ describe("classifyOllamaError", () => {
     "llama runner process has terminated: exit status 2",
     "model requires more system memory (24.0 GiB) than is available (20.1 GiB)",
     "CUDA error: out of memory",
+    "llama runner process has terminated: signal: killed",
+    "llama runner process no longer running: -1",
+    "an error was encountered while running the model: unexpected EOF",
   ])("「%s」は too_heavy", (msg) => {
     expect(classifyOllamaError(new OllamaHttpError(500, `Ollama 500: ${msg}`), true)).toBe("too_heavy");
     expect(classifyOllamaError(new OllamaStreamError(msg), true)).toBe("too_heavy");
@@ -91,5 +94,12 @@ describe("classifyOllamaError", () => {
   it("その他は failed", () => {
     expect(classifyOllamaError(new OllamaHttpError(400, "Ollama 400: invalid model"), true)).toBe("failed");
     expect(classifyOllamaError("weird", true)).toBe("failed");
+  });
+
+  it("応答の読み取り中に接続が切れたら、Ollama が戻っていても ollama_down（コンテナごとの再起動）", () => {
+    const terminated = Object.assign(new TypeError("terminated"), { cause: { code: "UND_ERR_SOCKET" } });
+    expect(classifyOllamaError(terminated, true)).toBe("ollama_down");
+    const reset = Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNRESET" } });
+    expect(classifyOllamaError(reset, true)).toBe("ollama_down");
   });
 });

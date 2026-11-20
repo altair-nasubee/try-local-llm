@@ -46,12 +46,32 @@ export async function* streamWithIdleTimeout<T>(
   }
 }
 
-const TOO_HEAVY = ["unexpectedly stopped", "out of memory", "requires more system memory", "exit status"];
+// コンテナのメモリ上限でモデルの実行プロセスが落ちた／読み込みを拒否されたときの Ollama の文言（版によって違う）
+const TOO_HEAVY = [
+  "unexpectedly stopped",
+  "out of memory",
+  "requires more system memory",
+  "exit status",
+  "signal: killed",
+  "process has terminated",
+  "no longer running",
+  "error was encountered while running the model",
+];
+
+// 応答の途中で接続そのものが切れた（コンテナごと落ちた）ときの fetch の例外
+const CONNECTION_LOST = new Set(["ECONNRESET", "UND_ERR_SOCKET", "EPIPE"]);
+
+function isConnectionLost(err: unknown): boolean {
+  if (!(err instanceof TypeError)) return false;
+  const code = (err.cause as { code?: string } | undefined)?.code;
+  return err.message === "terminated" || (code !== undefined && CONNECTION_LOST.has(code));
+}
 
 // ollama_down: Ollama 自体が応答しない（コンテナの再起動中）
 // too_heavy  : Ollama は生きているが、モデルの実行プロセスがメモリ不足で落ちた／読み込みを拒否した
 export function classifyOllamaError(err: unknown, up: boolean): "ollama_down" | "too_heavy" | "failed" {
-  if (!up) return "ollama_down";
+  // 接続が切れたあと、確かめる前に再起動が終わっていても ollama_down とする
+  if (!up || isConnectionLost(err)) return "ollama_down";
   const message = err instanceof OllamaHttpError || err instanceof OllamaStreamError || err instanceof Error ? err.message : "";
   const lower = message.toLowerCase();
   return TOO_HEAVY.some((k) => lower.includes(k)) ? "too_heavy" : "failed";
