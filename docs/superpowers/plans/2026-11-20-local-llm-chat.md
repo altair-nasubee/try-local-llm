@@ -198,6 +198,7 @@ it("既定値を返す", () => {
   expect(c.sessionLimit).toBe(10);
 });
 it("数値でない値は既定値に戻す", () => expect(getConfig({ NUM_CTX: "abc" }).numCtx).toBe(8192));
+it("DISCOVERY_ENABLED=\"false\" を false と読む", () => expect(getConfig({ DISCOVERY_ENABLED: "false" }).discoveryEnabled).toBe(false));   // E2E が外部サイトに出ない前提
 // i18n.test.ts
 it("変数を置換する", () => expect(t("download.confirmTitle", { name: "x" })).toBe("x はダウンロードされていません"));
 ```
@@ -277,7 +278,7 @@ it("デフォルトモデルが excluded サイズでも tier:\"slow\" として
   - `parseTagNames(html: string, family: string): string[]`
   - `isStandardTag(tag: string): boolean`
   - `fetchManifestSize(family, tag, fetchFn = fetch): Promise<number | null>`（`GET https://registry.ollama.ai/v2/library/<family>/manifests/<tag>`、`Accept: application/vnd.docker.distribution.manifest.v2+json`、`layers[].size` の合計）
-  - `readDiscoveryCache(cfg): Promise<{name; sizeBytes}[]>`（キャッシュ `${dataDir}/cache/discovery.json` = `{ fetchedAt, families, models }` を読むだけ。無ければ `[]`。ネットワークに出ない。`fetchedAt` の古さは見ない）
+  - `readDiscoveryCache(cfg): Promise<{name; sizeBytes}[]>`（キャッシュ `${dataDir}/cache/discovery.json` = `{ fetchedAt, families, models }` を読むだけ。無ければ `[]`。ネットワークに出ない。`fetchedAt` の古さは見ない。呼ばれるたびにファイルを読み、結果をメモリに持ち続けない（検索後や E2E でキャッシュを置き換えたとき、すぐ一覧に反映するため））
   - `refreshDiscovery(cfg, fetchFn = fetch): Promise<void>`（次のいずれかのときだけ検索して書き込む：キャッシュが無い／`discoveryTtlHours` より古い／キャッシュの `families` が今の `models.yaml` の `families` と違う。最後の条件は、spec 6.1 の（！）の説明「追記すると次回の起動時に検索」を 24 時間待たせないため。失敗時は古いキャッシュを残し、メモリ上で 1 時間は再検索しない（オフライン時に `/api/models` のたびに 30 秒の検索を繰り返さないため）。例外を外に出さない。同時実行は 1 つ）
   - `discoveryEnabled` が false（E2E 用）のときは `refreshDiscovery` を呼ばず、キャッシュの読み込みだけ行う
   - 呼び出し方：`instrumentation.ts` の起動時と、`GET /api/models` のたびに `void refreshDiscovery(cfg)` を待たずに（バックグラウンドで）呼ぶ（新しければ何もしない）。`GET /api/models` は常に `readDiscoveryCache` の結果だけで即応答する。理由：検索は最大 30 秒かかり、画面の表示を止めないため
@@ -410,8 +411,9 @@ it("本文が空で画像だけのセッションは title が『画像の質問
 - Produces:
   - `ollama.chat({ model, messages, think, numCtx }, signal): AsyncIterable<OllamaChatChunk>`（`POST /api/chat`、`stream: true`、`options: { num_ctx }`、メッセージの `images` は base64。過去のユーザー発言に付いた画像もセッションフォルダから読み込んで毎回付ける）
   - `streamWithIdleTimeout<T>(src: AsyncIterable<T>, idleMs: number, signal): AsyncIterable<T>`（チャンク間・最初のチャンクまでの無応答が `idleMs` を超えたら `IdleTimeoutError` を投げる）
-  - `POST /api/chat`（`multipart/form-data`：`sessionId?`、`model`、`content`、`images[]`）→ `application/x-ndjson` の `ChatEvent` ストリーム
-    - 新規なら最初に `{type:"session"}` を送る
+  - `POST /api/chat`（`multipart/form-data`：`sessionId?`、`model`、`content`、`images`（同じ名前で最大 4 回。`formData.getAll("images")`））→ `application/x-ndjson` の `ChatEvent` ストリーム
+    - 新規なら最初に `{type:"session"}` を送る。`sessionId` があるのにセッションが無ければ 404
+    - `ollama.chat` は Ollama のエラーを 2 つの形で受ける：HTTP エラー（本文 `{"error": "…"}`）と、200 のストリームの途中に来る `{"error": "…"}` の行。どちらも `error` の文を持つ例外にして `classifyOllamaError` に渡す（`too_heavy` の判定は主にこの文で行うため）
     - `think` は対象モデルの capabilities に `"thinking"` があるときだけ `true`
     - 完了時 `contextTokens = prompt_eval_count + eval_count`、`warn = contextTokens >= numCtx * contextWarnRatio`、`session.lastContextTokens` に保存
     - クライアント切断（`request.signal` abort）・タイムアウト・Ollama 切断のいずれでも、途中までの応答を `interrupted: true` で保存する。切断は応答用 `ReadableStream` の `cancel()` でも検知して同じ処理にする（`request.signal` が切断で発火しない Next.js の版があるため。どちらが先でも保存は 1 回だけ）
@@ -436,6 +438,8 @@ it("request.signal を abort すると途中の応答が interrupted で保存")
 it("capabilities に vision が無いモデルに画像を送ると 400")
 it("画像 5 枚は 400")
 it("本文が空で画像も無いと 400")
+it("存在しない sessionId は 404")
+it("ストリームの途中に {\"error\":\"model runner has unexpectedly stopped\"} の行が来ても too_heavy")
 it("Ollama 停止中に既存セッションへ送ると 409 ではなく error ollama_down")
 it("ReadableStream の cancel() でも途中の応答が interrupted で 1 回だけ保存される")
 ```
@@ -471,6 +475,7 @@ it("削除確認で [削除する] → 選択中モデルならデフォルト�
 it("アプリを開いた直後は新しいチャット（空）＋デフォルトモデル。過去のセッションは一覧から開く")
 it("DownloadState が error ならダイアログにエラー文を出し、閉じると locked が解除される")
 it("ollamaUp:false のときは選択中モデルが未インストール扱いでも DownloadDialog を開かない")
+it("表示中のセッションを一覧から削除すると新しいチャット（空）になる")
 ```
 
 - [ ] **Step 2–4: FAIL → 実装 → PASS**。アイコンはインライン SVG（ゴミ箱、情報、クリップ、鍵）で `Icon` にまとめる。セッション行のゴミ箱は `ConfirmDialog` を通す
@@ -533,7 +538,7 @@ it("interrupted のメッセージに（中断）が付く")
 @test "stop.sh は down に -v を付けない" { run scripts/stop.sh; assert_success; grep -q "compose down" "$DOCKER_CALLS"; ! grep -q -- "-v" "$DOCKER_CALLS"; }   # docker の引数は画面ではなく $DOCKER_CALLS に残るので、そちらを調べる
 @test "stop.sh は引数を受け付けない"    { run scripts/stop.sh -v; assert_failure; }
 @test "reset.sh は RESET 以外の入力で何も消さない" { run bash -c 'echo yes | scripts/reset.sh'; assert_failure; [ ! -s "$DOCKER_CALLS" ] || ! grep -q "down" "$DOCKER_CALLS"; }
-@test "reset.sh --dry-run は消す対象を表示し docker を変更系で呼ばない" { run scripts/reset.sh --dry-run; assert_output --partial "local-llm-chat_ollama-models"; ! grep -qE "down|rm|kill" "$DOCKER_CALLS"; }
+@test "reset.sh --dry-run は消す対象を表示し docker を変更系で呼ばない" { run scripts/reset.sh --dry-run; assert_output --partial "local-llm-chat_ollama-models"; ! grep -qE "compose .*(down|kill)|buildx rm|image rm|volume rm" "$DOCKER_CALLS"; }
 @test "reset.sh は --with-images が無ければ ollama イメージを消さない" { run bash -c 'echo RESET | scripts/reset.sh'; ! grep -q "image rm ollama/ollama" "$DOCKER_CALLS"; }
 @test "start.sh は frontend 起動済みなら up.sh を呼ばずブラウザだけ開く"
 @test "start.sh はポート 3000 使用中なら原因と対処の 2 行を出して失敗"
@@ -544,7 +549,7 @@ it("interrupted のメッセージに（中断）が付く")
 - [ ] **Step 0.5: 失敗を確認**　Run: `scripts/tests/run.sh`　Expected: FAIL（スクリプト未作成）
 - [ ] **Step 1: `start.sh`**：`cd "$LLM_APP_ROOT"` → `require_docker` → `.env` が無ければ `.env.example` からコピー → `.env` の `PORT`（無ければ 3000）を `grep '^PORT='` で読む（`.env` を `source` しない。以下 `$PORT`）→ 既に `frontend` が running ならブラウザを開いて終了 → ポート `$PORT` 使用中（`ss -ltn`）なら fail → `"$LLM_SCRIPTS_DIR/up.sh"`（`data/` はここで `mkdir -p` する。コンテナの `node` ユーザー＝UID 1000 で書けるよう、Docker に作らせない）→ `curl localhost:$PORT/api/health` を 2 秒間隔・最大 2 分、待ち中は経過秒を表示 → `"$WIN_CMD" /c start http://localhost:$PORT`（`WIN_CMD` 既定 `/mnt/c/Windows/System32/cmd.exe`。`appendWindowsPath=false` のため絶対パス）
 - [ ] **Step 2: `stop.sh`**：`docker compose stop` → `docker compose down`（`-v` を付けない）。引数は受け付けない
-- [ ] **Step 3: `reset.sh`**：対象一覧と合計サイズを表示（`docker system df -v` から volume `local-llm-chat_ollama-models` のサイズ、`du -sh data/`）→ `RESET` 入力で実行：`docker compose --project-directory "$LLM_APP_ROOT" kill` → `docker compose --project-directory "$LLM_APP_ROOT" down -v --rmi local --remove-orphans` → `data/sessions/*`・`data/cache/*`・`data/tmp/*` を削除（spec 8.5 の「ダウンロード中の印」は、この設計ではサーバーのメモリにしか無いのでファイルは消さなくてよい。「中断したダウンロードの残り」は ollama の volume ごと消える） → `docker buildx rm -f local-llm-chat`（専用ビルダーとそのビルドキャッシュを削除）→ E2E の残り（`docker compose -f compose.yaml -f compose.e2e.yaml -p local-llm-chat-e2e down -v --rmi all`。`-f` で E2E 用ファイルも読ませないと、そこでだけ定義した volume `e2e-data` が消えない。`--rmi all` は、偽 Ollama のイメージに名前を付けているため `local` では消えないから。E2E プロジェクトのイメージは偽 Ollama と E2E 用 frontend だけなので、本物の Ollama イメージは消えない）も削除 → `--with-images` のときだけ `docker image rm ollama/ollama:<タグ>`（タグは `docker compose config --images` から取る。`compose.yaml` を書き換えても追従するため）。最後に消えたものと「次は start で初回と同じように起動できます」を表示。`--dry-run` のときは一覧表示だけで終了（テストと事前確認用）
+- [ ] **Step 3: `reset.sh`**：対象一覧と合計サイズを表示（`docker system df -v` から volume `local-llm-chat_ollama-models` のサイズ、`du -sh data/`）→ `RESET` 入力で実行（それ以外の入力なら何もせず exit 1）：`docker compose --project-directory "$LLM_APP_ROOT" kill` → `docker compose --project-directory "$LLM_APP_ROOT" down -v --rmi local --remove-orphans` → `data/sessions/*`・`data/cache/*`・`data/tmp/*` を削除（spec 8.5 の「ダウンロード中の印」は、この設計ではサーバーのメモリにしか無いのでファイルは消さなくてよい。「中断したダウンロードの残り」は ollama の volume ごと消える） → `docker buildx rm -f local-llm-chat`（専用ビルダーとそのビルドキャッシュを削除）→ E2E の残り（`docker compose -f compose.yaml -f compose.e2e.yaml -p local-llm-chat-e2e down -v --rmi all`。`-f` で E2E 用ファイルも読ませないと、そこでだけ定義した volume `e2e-data` が消えない。`--rmi all` は、偽 Ollama のイメージに名前を付けているため `local` では消えないから。E2E プロジェクトのイメージは偽 Ollama と E2E 用 frontend だけなので、本物の Ollama イメージは消えない）も削除 → `--with-images` のときだけ `docker image rm ollama/ollama:<タグ>`（タグは `docker compose config --images` から取る。`compose.yaml` を書き換えても追従するため）。最後に消えたものと「次は start で初回と同じように起動できます」を表示。`--dry-run` のときは一覧表示だけで終了（テストと事前確認用）
 - [ ] **Step 4: `install-windows-shortcuts.sh`**：Windows のデスクトップに 3 つの `.bat` を生成。デスクトップの場所は `/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -Command "[Console]::OutputEncoding=[Text.Encoding]::UTF8; [Environment]::GetFolderPath('Desktop')"` で取得し、末尾の `\r` を除いて `wslpath` で変換する（`%USERPROFILE%\Desktop` 決め打ちだと OneDrive にデスクトップを移している PC で見えない場所に置かれるため。UTF-8 指定は日本語のユーザー名で文字化けしないため）。中身は `wsl.exe -d <生成時の $WSL_DISTRO_NAME の値> --cd <repo の絶対パス> bash scripts/<x>.sh` と `pause`（`%WSL_DISTRO_NAME%` は Windows 側に存在しないため、生成時に値を埋め込む）。`.bat` は改行を CRLF で書き（`printf '...\r\n'`）、文字化けを避けるため中身は英数字のみにする（`reset` は入力が要るのでウィンドウを残す）
 - [ ] **Step 5: テスト通過を確認**　Run: `scripts/tests/run.sh`　Expected: shellcheck エラーなし、bats 全件 PASS
 - [ ] **Step 5.5: 実機確認**　Run: `scripts/stop.sh && scripts/start.sh && scripts/start.sh && scripts/reset.sh --dry-run`　Expected: `start` で health 待ち後ブラウザが開く、2 回目の `start` は起動し直さない、`--dry-run` は何も消さない
@@ -559,7 +564,7 @@ it("interrupted のメッセージに（中断）が付く")
 - Create: `e2e/models.e2e.yaml`：`families: []`、`models: [{ name: "gemma4:e4b", sizeGb: 6.6 }, { name: "tiny-dl:1b", sizeGb: 0.05 }, { name: "slow-dl:8b", sizeGb: 8 }]`。ダウンロードの E2E は `tiny-dl:1b` を使う（本番の `models.yaml` の `gemma4:12b`（8GB）だと、空き容量チェックに 8.8GB 必要になり、空きの少ない CI ランナーで 507 になって失敗するため）。`slow-dl:8b` は「遅くなります」の表示確認用
 - Create: `frontend/playwright.config.ts`（E2E 用：`testDir: "e2e"`、`testIgnore: "smoke/**"`、`baseURL: http://localhost:3100`、**`workers: 1`・`fullyParallel: false`**（偽 Ollama とサーバー側のダウンロード状態は全テストで 1 つを共有するため、並列に動かすと互いの状態を壊す））、`frontend/playwright.smoke.config.ts`（`testDir: "e2e/smoke"`、`baseURL: http://localhost:3000`）、`frontend/e2e/helpers.ts`、`frontend/e2e/{chat,models,sessions,attachments,recovery}.spec.ts`、`frontend/e2e/fixtures/{sample.png,sample.gif,cache/discovery.json}`、`frontend/e2e/smoke/real-ollama.spec.ts`
   - 10MB 超・9MB の画像は fixture としてコミットせず、テスト内で `Buffer` から作って `setInputFiles({ name, mimeType, buffer })` で渡す（リポジトリを重くしないため）
-  - `helpers.ts` の `resetAll()`（各 spec の `beforeEach` で呼ぶ）：① `POST /__mock/reset` ② `DELETE /api/models/download`（前のテストのダウンロード状態 error/done/running を `idle` に戻す。サーバーのメモリに残るため）③ `docker compose -f ../compose.yaml -f ../compose.e2e.yaml -p local-llm-chat-e2e exec -T frontend sh -c 'rm -rf /app/data/sessions /app/data/cache && mkdir -p /app/data/cache'`（node ユーザーで作る）④ 必要な spec だけ `docker compose -f ../compose.yaml -f ../compose.e2e.yaml -p local-llm-chat-e2e cp e2e/fixtures/cache/discovery.json frontend:/app/data/cache/discovery.json`（`cp` は親フォルダが無いと失敗するため ③ の後に行う）。コマンドは `node:child_process` の `execFileSync` で呼ぶ（Playwright は `frontend/` で動くため、compose ファイルは `../` で指す）
+  - `helpers.ts` の `resetAll()`（各 spec の `beforeEach` で呼ぶ）：① `POST http://localhost:11500/__mock/reset` ② `DELETE http://localhost:3100/api/models/download`（前のテストのダウンロード状態 error/done/running を `idle` に戻す。サーバーのメモリに残るため）③ `docker compose -f ../compose.yaml -f ../compose.e2e.yaml -p local-llm-chat-e2e exec -T frontend sh -c 'rm -rf /app/data/sessions /app/data/cache && mkdir -p /app/data/cache'`（node ユーザーで作る）④ 必要な spec だけ `docker compose -f ../compose.yaml -f ../compose.e2e.yaml -p local-llm-chat-e2e cp e2e/fixtures/cache/discovery.json frontend:/app/data/cache/discovery.json`（`cp` は親フォルダが無いと失敗するため ③ の後に行う）。コマンドは `node:child_process` の `execFileSync` で呼ぶ（Playwright は `frontend/` で動くため、compose ファイルは `../` で指す）
 - Modify: `frontend/package.json`（`npm i -D @playwright/test` の後、`"test:e2e": "bash ../scripts/e2e.sh"`、`"test:smoke": "playwright test -c playwright.smoke.config.ts"`）
 
 **Interfaces:**
@@ -567,7 +572,7 @@ it("interrupted のメッセージに（中断）が付く")
 - Produces: 偽サーバーの操作用 API（テストからのみ呼ぶ。`/__mock/*` は本物の Ollama に存在しないパス）
   - `POST /__mock/reset`：初期状態に戻す（installed = `gemma4:e4b`(6.6e9, capabilities `["completion","vision","thinking"]`)、`text-only:1b`(1e9, `["completion"]`)。down 状態も解除し、script・pull の設定も既定に戻す）。サーバー起動時もこの状態で始まる（frontend の起動時処理がデフォルトモデルを入っていると判断し、自動 DL を始めないため）
   - 既定の応答（script を指定しないとき）：`thinking` なし、`content: "OK"`、`chunkDelayMs: 20`。既定の pull：`totalBytes: 5e7`、`stepMs: 100`
-  - `POST /__mock/script { thinking?: string; content: string; chunkDelayMs?: number; dropAfterChunks?: number; promptEvalCount?: number; failWith?: string }`：次の `/api/chat` の応答内容（`failWith` は Ollama と同じ形のエラー JSON を返す。例 `"model runner has unexpectedly stopped"`）
+  - `POST /__mock/script { thinking?: string; content: string; chunkDelayMs?: number; dropAfterChunks?: number; promptEvalCount?: number; failWith?: string }`：次の `/api/chat` の応答内容（`dropAfterChunks` は N チャンク送った時点で**先に down 状態に入ってから**接続を切る。コンテナごと落ちた状態の再現。接続を切るだけだと、frontend が直後に `isUp()` で確かめたとき偽サーバーがまだ生きていて `failed` に分類され、テストが `/__mock/down` を呼ぶタイミング次第で結果が変わるため。`failWith` は Ollama と同じ形のエラー JSON（HTTP 500・本文 `{"error": "…"}`）を返す。ストリーム途中のエラー行は Task 8 の単体テストで確認する。例 `"model runner has unexpectedly stopped"`）
   - `POST /__mock/down` / `POST /__mock/up`：`/api/version` を含む全 API の停止・復帰（OOM 再起動の再現）。停止中は `/__mock/*` 以外のリクエストに応答せず `req.socket.destroy()` で切る（実機の接続拒否・切断と同じく fetch が例外になるようにするため。503 を返すと `ollama_down` ではなく `failed` の経路を通ってしまう）。停止した瞬間に流れている `/api/chat` の応答も切る
   - `POST /__mock/pull { totalBytes: number; stepMs: number; failAt?: number }`：次の `/api/pull` の進捗の出方。完了したらそのモデルを installed に加え（サイズ `totalBytes`、capabilities `["completion"]`）、`DELETE /api/delete` で installed から外す（完了後の一覧更新・削除の E2E のため）
   - 本物と同じ形で応答するもの：`GET /api/version`、`GET /api/tags`、`POST /api/show`、`POST /api/chat`（NDJSON）、`POST /api/pull`（NDJSON）、`DELETE /api/delete`
@@ -607,7 +612,7 @@ test("GIF・10MB 超・5 枚目は拒否される")
 test("9MB の PNG 4 枚を一度に送っても受け付けられる")   // 本文サイズ上限の確認
 test("text-only:1b では📎が disabled")
 // recovery.spec.ts
-test("応答中に dropAfterChunks＋/__mock/down → バナー表示、途中応答は（中断）で残る、/__mock/up でバナーが消え送信できる")  // Review Focus 1
+test("dropAfterChunks で応答中に偽サーバーごと停止 → バナー表示、途中応答は（中断）で残る、/__mock/up でバナーが消え送信できる")  // Review Focus 1
 test("偽サーバーが down のまま画面を開いても表示され、削除済み表示やダウンロードダイアログは出ず、up 後にモデル一覧が出る")   // Review Focus 5
 test("failWith でモデルの実行プロセス停止を再現 → バナー表示 → 自動で消え、再送できる")
 ```
