@@ -1,11 +1,13 @@
 "use client";
+import { memo } from "react";
 import type { UiMessage } from "@/hooks/useChat";
 import { t } from "@/lib/i18n";
 import { MarkdownView } from "./MarkdownView";
 import { ThinkingBlock } from "./ThinkingBlock";
 import styles from "./Chat.module.css";
 
-export function MessageBubble({
+// 応答中は最後の発言だけが変わるので、ほかの発言は描き直さない
+export const MessageBubble = memo(function MessageBubble({
   message,
   sessionId,
   streaming,
@@ -46,4 +48,4 @@ export function MessageBubble({
       {message.interrupted && <span className={styles.interrupted}>{t("chat.interrupted")}</span>}
     </div>
   );
-}
+});

@@ -74,4 +74,14 @@ describe("MarkdownView", () => {
     await waitFor(() => expect(container.querySelector("pre code")).toHaveTextContent("graph ???"));
     expect(screen.queryByTestId("diagram")).toBeNull();
   });
+
+  it("同じ本文で描き直しても、図を作り直さない（ストリーミング中のちらつき防止）", async () => {
+    const text = "```mermaid\ngraph TD; A-->B\n```\n\n続き";
+    const { rerender } = render(<MarkdownView text={text} streaming={true} />);
+    await waitFor(() => expect(screen.getByTestId("diagram")).toBeInTheDocument());
+    rerender(<MarkdownView text={text + "の文"} streaming={true} />);
+    rerender(<MarkdownView text={text + "の文章"} streaming={true} />);
+    expect(screen.getByTestId("diagram")).toBeInTheDocument();
+    expect(mermaid.render).toHaveBeenCalledTimes(1);
+  });
 });
