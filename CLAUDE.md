@@ -14,7 +14,7 @@ Ollama（GPU）＋ Next.js のローカル LLM チャットアプリ。Docker Co
 - 画面の文言は `frontend/messages/ja.json` から `t(key)` で読む。コンポーネントに直書きしない
 - 色は `frontend/app/globals.css` の CSS 変数経由。テーマは `"system" | "light" | "dark"`（今回は `system` 固定）
 - ブラウザから Ollama を直接呼ばない。必ず `frontend/app/api/` の Route Handler を通す（将来の認証は `frontend/proxy.ts` に足す。Next.js 15 以前なら `middleware.ts`）
-- Ollama のポートはホストに公開しない。`frontend` は `${BIND_ADDRESS:-127.0.0.1}:${PORT:-3000}` で公開
+- Ollama のポートはホストに公開しない（E2E の偽 Ollama の操作用ポート `127.0.0.1:11500` だけは例外）。`frontend` は `${BIND_ADDRESS:-127.0.0.1}:${PORT:-3000}` で公開
 - 共有型は `frontend/lib/types.ts` に集約。同じ型を別の場所で定義しない
 - 応答の Markdown で HTML を描画しない（`rehype-raw` 禁止）
 - API が受け取るセッション ID・画像ファイル名・モデル名は必ず形式チェックする（形式は実装計画の Global Constraints）
@@ -22,7 +22,7 @@ Ollama（GPU）＋ Next.js のローカル LLM チャットアプリ。Docker Co
 - 画面の動作確認は偽 Ollama（`e2e/mock-ollama/`）を使う E2E で行う。実モデルの出力に依存するテストを E2E に書かない
 - E2E は compose プロジェクト名 `local-llm-chat-e2e`・ポート 3100 で動かし、本番のデータ・volume・ポートに触れない
 - スクリプトは `LLM_APP_ROOT` を基準に動く。スクリプトのテストでは必ず一時ディレクトリを指定する
-- データを消す操作は `scripts/reset.sh`（`RESET` 入力が必要）だけ。`stop.sh` や他の処理に削除を足さない
+- データを消す操作は `scripts/reset.sh`（`RESET` 入力が必要）だけ。`stop.sh` や他の処理に削除を足さない（例外：E2E が自分の一時 volume `local-llm-chat-e2e_*` を掃除する処理）
 
 ## コマンド
 
@@ -44,7 +44,7 @@ Ollama（GPU）＋ Next.js のローカル LLM チャットアプリ。Docker Co
 
 - このリポジトリのコミット用メールは GitHub の非公開アドレス（`git config user.email` に設定済み）。変更しない
 - コミット文は日本語可。末尾に `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`
-- `.env` と `data/` はコミットしない（`.gitignore` 済み）
+- `.env` と `data/` の中身はコミットしない（`.gitignore` 済み。`data/.gitkeep` だけは例外）
 
 ## 環境メモ
 
