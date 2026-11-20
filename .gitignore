@@ -1,0 +1,17 @@
+# 環境変数（秘密情報を含む可能性）
+.env
+.env.*
+!.env.example
+
+# セッション履歴・添付画像などの実行時データ
+data/
+
+# Node.js / Next.js
+node_modules/
+.next/
+out/
+*.log
+
+# OS / エディタ
+.DS_Store
+Thumbs.db
