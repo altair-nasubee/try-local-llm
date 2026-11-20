@@ -16,7 +16,8 @@
 - 色はすべて `frontend/app/globals.css` の CSS 変数経由。テーマ型は `"system" | "light" | "dark"`、今回は `"system"` 固定（spec 8.2）
 - ブラウザから Ollama を直接呼ばない。Ollama は compose 内部ネットワークのみ、ホストにポートを公開しない（spec 8.1）
 - `frontend` のポート公開は `${BIND_ADDRESS:-127.0.0.1}:${PORT:-3000}:3000`（spec 8.1）
-- compose のプロジェクト名は `local-llm-chat` 固定（reset.sh がこの名前で対象を絞る）
+- compose のプロジェクト名は `local-llm-chat` 固定（reset.sh がこの名前で対象を絞る）。E2E は `local-llm-chat-e2e`・ポート 3100
+- スクリプトはすべて `LLM_APP_ROOT`（既定：リポジトリのルート）を基準に動く
 - `.env` の項目と既定値：`DEFAULT_MODEL=gemma4:e4b` / `OLLAMA_MEM_LIMIT=24g` / `IDLE_TIMEOUT_SEC=180` / `NUM_CTX=8192` / `CONTEXT_WARN_RATIO=0.8` / `TIER_COMFORT_MAX_GB=7` / `TIER_EXCLUDE_MIN_GB=20` / `DISCOVERY_TTL_HOURS=24` / `SESSION_LIMIT=10` / `BIND_ADDRESS=127.0.0.1` / `PORT=3000`
 - 負荷区分：サイズ ≤ 7GB → `comfort`、7GB < サイズ < 20GB → `slow`、≥ 20GB → `excluded`（一覧に出さない）。1GB = 1e9 bytes
 - 画像：PNG / JPEG / WebP、1 枚 10MB まで、1 回 4 枚まで
@@ -60,15 +61,16 @@
 │   ├── lib.sh                # 共通関数（色付き出力、前提チェック、専用ビルダー）
 │   ├── up.sh                 # 専用ビルダーでビルドして compose up（開発・start.sh 共通）
 │   ├── start.sh / stop.sh / reset.sh
-│   ├── install-windows-shortcuts.sh
-│   └── tests/                # bats テスト・docker スタブ（Task 11）   # LocalLLM-start/stop/reset.bat をデスクトップに生成
+│   ├── install-windows-shortcuts.sh   # LocalLLM-start/stop/reset.bat をデスクトップに生成
+│   ├── e2e.sh                # E2E 用 compose の起動・テスト・後片付け（Task 12）
+│   └── tests/                # bats テスト・docker スタブ（Task 11）
 ├── compose.e2e.yaml          # E2E 用：ollama を偽サーバーに差し替え（Task 12）
 ├── e2e/mock-ollama/          # 偽 Ollama サーバー（Task 12）
 ├── .github/workflows/test.yml  # CI（Task 13）
 └── frontend/
     ├── Dockerfile
     ├── next.config.ts
-    ├── middleware.ts         # 認証差し込み口（今回は素通し）
+    ├── proxy.ts              # 認証差し込み口（今回は素通し。Next.js 15 以前なら middleware.ts）
     ├── messages/ja.json
     ├── app/
     │   ├── layout.tsx, page.tsx, globals.css
@@ -136,7 +138,9 @@ export type ChatEvent =
   | { type: "thinking"; text: string }
   | { type: "content"; text: string }
   | { type: "done"; contextTokens: number; contextLimit: number; warn: boolean }
-  | { type: "error"; code: "timeout" | "ollama_down" | "failed" | "busy"; message: string };
+  | { type: "error"; code: "timeout" | "ollama_down" | "too_heavy" | "failed"; message: string };
+// ollama_down: Ollama コンテナ自体が応答しない（再起動中）
+// too_heavy : Ollama は生きているが、モデルの実行プロセスがメモリ不足で落ちた／読み込みを拒否した
 ```
 
 ---
@@ -149,9 +153,9 @@ export type ChatEvent =
 **Interfaces:**
 - Produces: `scripts/lib.sh` の関数 `info <msg>` / `ok <msg>` / `fail <msg> <対処>`（`fail` は exit 1）/ `require_docker` / `require_gpu_in_docker` / `ensure_builder`（buildx ビルダー `local-llm-chat`（`--driver docker-container`）が無ければ作成し、`export BUILDX_BUILDER=local-llm-chat`）。Task 2・11 が使う
 
-- [ ] **Step 1: `scripts/lib.sh` を作る**。`fail` は「✖ 原因」「→ 対処」の 2 行を出す。`require_docker`：`docker` が無ければ `fail "Docker が見つかりません" "scripts/setup.sh を実行してください"`、デーモン停止なら `sudo systemctl start docker` を試す。`require_gpu_in_docker`：`docker run --rm --gpus all ubuntu nvidia-smi -L` が失敗したら fail。`ensure_builder`：専用ビルダーにする理由は、`reset.sh` が `docker buildx rm local-llm-chat` でこのアプリのビルドキャッシュだけを確実に消せるようにするため（`docker builder prune` はプロジェクト単位で絞れない）
-- [ ] **Step 2: `scripts/setup.sh` を作る**。Docker 公式手順（apt リポジトリ追加 → `docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin`）、`usermod -aG docker $USER`、`systemctl enable --now docker`、NVIDIA 公式手順（`nvidia-container-toolkit` 導入 → `nvidia-ctk runtime configure --runtime=docker` → docker 再起動）。各段階の前に導入済みかを確認してスキップ（再実行しても安全）。最後に `docker run --rm --gpus all ubuntu nvidia-smi -L` の結果を表示
-- [ ] **Step 3: 構文チェック**　Run: `bash -n scripts/lib.sh scripts/setup.sh && shellcheck scripts/*.sh`（shellcheck が無ければ `sudo apt install -y shellcheck` をユーザーに依頼）　Expected: エラーなし
+- [ ] **Step 1: `scripts/lib.sh` を作る**。`fail` は「✖ 原因」「→ 対処」の 2 行を出す。`require_docker`：`docker` が無ければ `fail "Docker が見つかりません" "scripts/setup.sh を実行してください"`、デーモン停止なら `sudo -n systemctl start docker` を試し（パスワードを求めない）、失敗したら `fail "Docker が停止しています" "sudo systemctl start docker を実行してください"`。`require_gpu_in_docker`：`docker run --rm --gpus all ubuntu nvidia-smi -L` が失敗したら fail。`ensure_builder`：専用ビルダーにする理由は、`reset.sh` が `docker buildx rm local-llm-chat` でこのアプリのビルドキャッシュだけを確実に消せるようにするため（`docker builder prune` はプロジェクト単位で絞れない）
+- [ ] **Step 2: `scripts/setup.sh` を作る**。Docker 公式手順（apt リポジトリ追加 → `docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin`）、`usermod -aG docker "$SUDO_USER"`（sudo 実行中の `$USER` は root になるため。`$SUDO_USER` が空なら中断）、`systemctl enable --now docker`、NVIDIA 公式手順（`nvidia-container-toolkit` 導入 → `nvidia-ctk runtime configure --runtime=docker` → docker 再起動）。各段階の前に導入済みかを確認してスキップ（再実行しても安全）。最後に `docker run --rm --gpus all ubuntu nvidia-smi -L` の結果を表示
+- [ ] **Step 3: 構文チェック**　Run: `for f in scripts/*.sh; do bash -n "$f"; done && shellcheck scripts/*.sh`（shellcheck が無ければ `sudo apt install -y shellcheck` をユーザーに依頼）　Expected: エラーなし
 - [ ] **Step 4: ユーザーが実行する**（sudo パスワードが必要なため実装者は実行しない）。ユーザーに `sudo bash scripts/setup.sh` を依頼し、終了後 WSL を開き直してもらう
 - [ ] **Step 5: 確認**　Run: `docker run --rm --gpus all ubuntu nvidia-smi -L`　Expected: `GPU 0: NVIDIA GeForce RTX 5070 Laptop GPU` を含む
 - [ ] **Step 6: Commit**　`git add scripts/ && git commit -m "chore: 環境構築スクリプトを追加"`
@@ -159,7 +163,7 @@ export type ChatEvent =
 ### Task 2: プロジェクトの土台（Next.js・compose・設定・i18n・テーマ）
 
 **Files:**
-- Create: `scripts/up.sh`、`frontend/`（create-next-app）、`frontend/Dockerfile`、`frontend/next.config.ts`、`frontend/middleware.ts`、`frontend/lib/{config,i18n,theme,types}.ts`、`frontend/messages/ja.json`、`frontend/app/globals.css`、`compose.yaml`、`.env.example`、`models.yaml`
+- Create: `scripts/up.sh`、`frontend/`（create-next-app）、`frontend/Dockerfile`、`frontend/vitest.config.ts`、`frontend/next.config.ts`、`frontend/proxy.ts`、`frontend/lib/{config,i18n,theme,types}.ts`、`frontend/messages/ja.json`、`frontend/app/globals.css`、`compose.yaml`、`.env.example`、`models.yaml`
 - Test: `frontend/lib/__tests__/config.test.ts`、`frontend/lib/__tests__/i18n.test.ts`
 
 **Interfaces:**
@@ -169,7 +173,7 @@ export type ChatEvent =
   - `type Theme = "system" | "light" | "dark"`、`getTheme(): Theme`（常に `"system"`）
   - `lib/types.ts`（上記の共有型）
 
-- [ ] **Step 1: 雛形作成**　`npx create-next-app@latest frontend --ts --app --eslint --no-tailwind --no-src-dir --import-alias "@/*"`、続けて `npm i -D vitest @vitest/coverage-v8 @testing-library/react @testing-library/jest-dom jsdom` と `npm i yaml`。`package.json` に `"test": "vitest run"`
+- [ ] **Step 1: 雛形作成**　`npx create-next-app@latest frontend --ts --app --eslint --no-tailwind --no-src-dir --import-alias "@/*" --use-npm --yes`、続けて `npm i -D vitest @vitest/coverage-v8 @vitejs/plugin-react @testing-library/react @testing-library/jest-dom jsdom` と `npm i yaml`。`vitest.config.ts`（`environment: "jsdom"`、`plugins: [react()]`、`@/` エイリアス、`exclude: ["e2e/**"]`）を作り、`package.json` に `"test": "vitest run"`。インストールされた Next.js のメジャー版を確認し、16 以降なら認証差し込み口は `proxy.ts`、15 以前なら `middleware.ts` とする（以下 `proxy.ts` と書く）
 - [ ] **Step 2: 失敗するテストを書く**
 
 ```ts
@@ -189,10 +193,10 @@ it("変数を置換する", () => expect(t("download.confirmTitle", { name: "x" 
 （`getConfig(env = process.env)` として env を注入可能にする）
 
 - [ ] **Step 3: 失敗を確認**　Run: `cd frontend && npm test`　Expected: FAIL（モジュール未定義）
-- [ ] **Step 4: 実装**。`messages/ja.json` には spec の全文言を入れる（6.1 の（！）説明文、6.2/6.3 ダイアログ、6.4 警告「会話が長くなりました。新しいチャットをおすすめします」、6.5「このモデルは削除されています」、7.3「モデルが重すぎて停止しました。再起動中です」、思考「考え中…（クリックで展開）」、低速注記「遅くなります」）。`globals.css` はライト値を `:root` に、ダーク値を `@media (prefers-color-scheme: dark)` と `[data-theme="dark"]` に定義。`middleware.ts` は `NextResponse.next()` を返し、「認証はここに追加する」コメントを置く。`next.config.ts` に `output: "standalone"`
+- [ ] **Step 4: 実装**。`messages/ja.json` には spec の全文言を入れる（6.1 の（！）説明文、6.2/6.3 ダイアログ、6.4 警告「会話が長くなりました。新しいチャットをおすすめします」、6.5「このモデルは削除されています」、7.3「モデルが重すぎて停止しました。再起動中です」、思考「考え中…（クリックで展開）」、低速注記「遅くなります」）。`globals.css` はライト値を `:root` に、ダーク値を `@media (prefers-color-scheme: dark)` と `[data-theme="dark"]` に定義。`proxy.ts` は `NextResponse.next()` を返し、「認証はここに追加する」コメントを置く。`next.config.ts` に `output: "standalone"`
 - [ ] **Step 5: テスト通過を確認**　Run: `npm test`　Expected: PASS
 - [ ] **Step 6: Docker 一式**
-  - `frontend/Dockerfile`：`node:22-bookworm-slim` のマルチステージ、standalone 出力をコピー、`EXPOSE 3000`、`USER node`
+  - `frontend/Dockerfile`：`node:22-bookworm-slim` のマルチステージ、standalone 出力をコピー、`RUN mkdir -p /app/data && chown node:node /app/data`（名前付き volume をマウントしたときも node ユーザーで書けるようにするため）、`EXPOSE 3000`、`USER node`
   - `compose.yaml`：`name: local-llm-chat`。`ollama`：`image: ollama/ollama:<固定タグ>`（`gh release view -R ollama/ollama --json tagName` で最新の安定版を調べて固定）、`gpus: all`、`mem_limit: ${OLLAMA_MEM_LIMIT:-24g}`、`restart: unless-stopped`、volume `ollama-models:/root/.ollama`、`healthcheck: ollama list`、ポート公開なし。`frontend`：`build: ./frontend`、`env_file: .env`、`ports: ["${BIND_ADDRESS:-127.0.0.1}:${PORT:-3000}:3000"]`、`volumes: ["./data:/app/data", "./models.yaml:/app/models.yaml:ro"]`、`restart: unless-stopped`、`depends_on: ollama`（`condition: service_started`。ollama 未起動でも frontend は動く必要があるため healthy 待ちにしない）
   - `.env.example`：Global Constraints の全項目
   - `models.yaml`：
@@ -250,7 +254,7 @@ it("デフォルトモデルが excluded サイズでも一覧に残す")       
 
 **Files:**
 - Create: `frontend/lib/discovery.ts`
-- Modify: `frontend/app/api/models/route.ts`（discovered を `buildCatalog` に渡す）
+- Modify: `frontend/app/api/models/route.ts`（`readDiscoveryCache` の結果を `buildCatalog` に渡す）、`frontend/instrumentation.ts`（起動時に `refreshDiscovery`。Task 5 で作るファイルなので、Task 4 で先に作成し Task 5 で追記する）
 - Test: `frontend/lib/__tests__/discovery.test.ts`、fixture `frontend/lib/__tests__/fixtures/gemma4-tags.html`（`curl -s https://ollama.com/library/gemma4/tags` を保存）
 
 **Interfaces:**
@@ -258,7 +262,9 @@ it("デフォルトモデルが excluded サイズでも一覧に残す")       
   - `parseTagNames(html: string, family: string): string[]`
   - `isStandardTag(tag: string): boolean`
   - `fetchManifestSize(family, tag, fetchFn = fetch): Promise<number | null>`（`GET https://registry.ollama.ai/v2/library/<family>/manifests/<tag>`、`Accept: application/vnd.docker.distribution.manifest.v2+json`、`layers[].size` の合計）
-  - `getDiscovered(cfg, fetchFn = fetch): Promise<{name; sizeBytes}[]>`（キャッシュ `${dataDir}/cache/discovery.json` = `{ fetchedAt, models }`。`discoveryTtlHours` 以内ならキャッシュを返す。ネットワーク失敗時は古いキャッシュ、無ければ `[]`。例外を外に出さない）
+  - `readDiscoveryCache(cfg): Promise<{name; sizeBytes}[]>`（キャッシュ `${dataDir}/cache/discovery.json` = `{ fetchedAt, models }` を読むだけ。無ければ `[]`。ネットワークに出ない）
+  - `refreshDiscovery(cfg, fetchFn = fetch): Promise<void>`（キャッシュが `discoveryTtlHours` より古いか無いときだけ検索して書き込む。失敗時は古いキャッシュを残す。例外を外に出さない。同時実行は 1 つ）
+  - 呼び出し方：`instrumentation.ts` の起動時と、`GET /api/models` でキャッシュが古いときに `refreshDiscovery` を待たずに（バックグラウンドで）呼ぶ。`GET /api/models` は常に `readDiscoveryCache` の結果だけで即応答する。理由：検索は最大 30 秒かかり、画面の表示を止めないため
 
 - [ ] **Step 1: 失敗するテストを書く**
 
@@ -268,20 +274,22 @@ expect(["e2b","e4b","12b","26b","31b","1.5b","70b"].every(isStandardTag)).toBe(t
 expect(["latest","31b-cloud","12b-mlx","12b-it-q8_0","26b-a4b","12b-nvfp4","12b-mxfp8","31b-it-bf16"].some(isStandardTag)).toBe(false);
 it("manifest の layers.size を合計する")            // fetchFn をモックし [100, 200] → 300
 it("キャッシュが TTL 内なら fetch しない")
-it("fetch が全て失敗してもキャッシュ無しなら [] を返す")
+it("fetch が全て失敗してもキャッシュは壊さず、readDiscoveryCache は [] を返す")
+it("refreshDiscovery の同時呼び出しは 1 回だけ検索する")
 ```
 `isStandardTag` の判定は正規表現 `/^e?\d+(\.\d+)?b$/`。
 
 - [ ] **Step 2: 失敗を確認**　Run: `npm test -- discovery`　Expected: FAIL
 - [ ] **Step 3: 実装**。`parseTagNames` は `href="/library/<family>:<tag>"` を抽出し重複除去。manifest 取得は family ごとに直列、全体 30 秒で打ち切り
 - [ ] **Step 4: テスト通過を確認**　Expected: PASS
-- [ ] **Step 5: 実機確認**　Run: `scripts/up.sh && curl -s localhost:3000/api/models | grep -o '"source":"discovered"' | head -3 && ls data/cache/discovery.json`　Expected: discovered が 1 件以上、キャッシュファイルあり
+- [ ] **Step 5: 実機確認**　Run: `scripts/up.sh && sleep 40 && curl -s localhost:3000/api/models | grep -o '"source":"discovered"' | head -3 && ls data/cache/discovery.json`　Expected: discovered が 1 件以上、キャッシュファイルあり
 - [ ] **Step 6: Commit**
 
 ### Task 5: ダウンロード管理（進捗・中止・空き容量・起動時自動 DL）
 
 **Files:**
-- Create: `frontend/lib/downloads.ts`、`frontend/lib/disk.ts`、`frontend/app/api/models/download/route.ts`、`frontend/instrumentation.ts`
+- Create: `frontend/lib/downloads.ts`、`frontend/lib/disk.ts`、`frontend/app/api/models/download/route.ts`
+- Modify: `frontend/instrumentation.ts`（Task 4 で作成済み）
 - Modify: `frontend/lib/ollama.ts`（`pull` 追加）
 - Test: `frontend/lib/__tests__/downloads.test.ts`、`frontend/lib/__tests__/disk.test.ts`
 
@@ -292,10 +300,10 @@ it("fetch が全て失敗してもキャッシュ無しなら [] を返す")
   - `getDownloadManager(): DownloadManager`（`globalThis.__downloadManager` に保持）
     - `state(): DownloadState`
     - `start(model: string, expectedBytes: number | null): { ok: true } | { ok: false; code: "busy" | "disk" ; message: string }`
-    - `cancel(): void`
+    - `cancel(): void`（`running` なら中止して `idle`。`error` / `done` なら `idle` に戻すだけ＝エラー表示を閉じる操作）
     - `isBusy(): boolean`
   - `freeBytes(path: string): Promise<number>`（`fs.statfs`、`bavail * bsize`）
-  - API：`GET /api/models/download` → `DownloadState`、`POST { model }` → 202 / 409(busy) / 507(disk)、`DELETE` → 中止
+  - API：`GET /api/models/download` → `DownloadState`、`POST { model }` → 202 / 409(busy) / 507(disk)、`DELETE` → 中止、または error / done の表示を閉じる（`cancel()`）
   - 他の変更系 API（チャット送信・モデル削除・セッション削除）は `isBusy()` のとき 409 を返す（Task 6–8 で使用）
 
 - [ ] **Step 1: 失敗するテストを書く**（`pull` をモック）
@@ -307,6 +315,7 @@ it("空き容量 < expectedBytes * 1.1 なら disk を返し開始しない")
 it("cancel で AbortSignal が発火し state が idle に戻る")
 it("pull が error 行を返したら state は error（message 付き）")
 it("done/error の後の start は受け付ける")
+it("error 状態で cancel すると idle に戻る")
 ```
 
 - [ ] **Step 2: 失敗を確認**　Expected: FAIL
@@ -323,7 +332,7 @@ it("done/error の後の start は受け付ける")
 
 **Interfaces:**
 - Consumes: `ollama.deleteModel`、`getDownloadManager().isBusy()`、`getConfig().defaultModel`
-- Produces: `DELETE /api/models/:name`（name は `encodeURIComponent`）→ 204 / 400(`default_model`) / 409(`busy`)
+- Produces: `DELETE /api/models/:name`（name は `encodeURIComponent`。`gemma4:e4b` → `gemma4%3Ae4b`）→ 204 / 400(`default_model`) / 409(`busy`)。静的ルート `models/download` が動的ルート `models/[name]` より優先されるため衝突しない
 
 - [ ] **Step 1: 失敗するテストを書く**：「デフォルトモデルは 400」「ダウンロード中は 409」「通常は deleteModel を呼び 204」
 - [ ] **Step 2: 失敗を確認** → **Step 3: 実装** → **Step 4: PASS を確認**
@@ -377,7 +386,9 @@ it("images の file に ../ を含むと 400")
     - `think` は対象モデルの capabilities に `"thinking"` があるときだけ `true`
     - 完了時 `contextTokens = prompt_eval_count + eval_count`、`warn = contextTokens >= numCtx * contextWarnRatio`、`session.lastContextTokens` に保存
     - クライアント切断（`request.signal` abort）・タイムアウト・Ollama 切断のいずれでも、途中までの応答を `interrupted: true` で保存する
-    - エラーコード：タイムアウト → `timeout`、接続断かつ `isUp()` が false → `ollama_down`、その他 → `failed`、ダウンロード中 → 送信前に 409
+    - `classifyOllamaError(err: unknown, up: boolean): "ollama_down" | "too_heavy" | "failed"`：`up` が false → `ollama_down`。Ollama のエラー文に `unexpectedly stopped` / `out of memory` / `requires more system memory` / `exit status` を含む → `too_heavy`（コンテナのメモリ上限に当たると、多くの場合 Ollama 本体ではなくモデルの実行プロセスだけが落ちるため）。その他 → `failed`
+    - エラーコード：タイムアウト → `timeout`、それ以外は `classifyOllamaError`。ダウンロード中は送信前に 409
+    - `sessionId` がある場合、モデルはセッションに保存されたものを使い、フォームの `model` は無視する（1 セッション＝1 モデル）
     - セッションのモデルが未インストールなら 409（閲覧のみ）
 
 - [ ] **Step 1: 失敗するテストを書く**
@@ -389,6 +400,9 @@ it("チャンクが来続ければ総時間が idleMs を超えても切らな�
 // route.test.ts（ollama.chat をモック）
 it("thinking と content を別イベントで流し、done に contextTokens と warn を入れる")   // numCtx 8192, 7000 → warn:true
 it("途中で ollama.chat が ECONNRESET、isUp=false → error ollama_down、途中の応答が interrupted で保存")
+it("Ollama が 'model runner has unexpectedly stopped' を返す → error too_heavy")
+it("Ollama が 'model requires more system memory' を返す → error too_heavy")
+it("既存 sessionId に別の model を送ってもセッションのモデルで実行する")
 it("request.signal を abort すると途中の応答が interrupted で保存")
 it("capabilities に vision が無いモデルに画像を送ると 400")
 it("画像 5 枚は 400")
@@ -409,7 +423,7 @@ it("画像 5 枚は 400")
 - Produces（Task 10 が使う）：
   - `AppShell` が保持する画面状態 `UiState = { selectedModel: string; currentSessionId: string | null; locked: boolean /* ダウンロード中 */ }`
   - `useModels(): { models: ModelEntry[]; defaultModel: string; ollamaUp: boolean; refresh(): Promise<void> }`
-  - `useDownload(): { state: DownloadState; start(model): Promise<void>; cancel(): Promise<void> }`（`running` 中は 1 秒、それ以外は 5 秒間隔で `GET /api/models/download` をポーリング。`running`→`done` を検知したら `useModels().refresh()` を呼び、そのモデルを選択）
+  - `useDownload(opts: { onDone(model: string): void }): { state: DownloadState; start(model): Promise<void>; cancel(): Promise<void> }`（`running` 中は 1 秒、それ以外は 5 秒間隔で `GET /api/models/download` をポーリング。`done` を受け取ったら（ブラウザを閉じている間に完了した場合も含め、遷移を見なくても）`onDone(model)` を呼んでから `cancel()` で `idle` に戻す。`AppShell` は `onDone` で `useModels().refresh()` とモデル選択を行う）
   - `useSessions(): { list: SessionSummary[]; refresh(); remove(id) }`
 
 - [ ] **Step 1: 失敗するテストを書く**
@@ -439,7 +453,7 @@ it("DownloadState が error ならダイアログにエラー文を出し、閉�
 - Consumes: `UiState`、`useModels`、`POST /api/chat`、`GET /api/health`
 - Produces:
   - `hasOpenFence(md: string): boolean`（行頭 ```` ``` ```` の個数が奇数なら true）
-  - `useChat(sessionId): { messages; send(content, files: File[]); stop(); streaming: boolean; warn: boolean; ollamaDown: boolean }`（`stop` は fetch を abort。`error ollama_down` を受けたら `ollamaDown=true` にし、`/api/health` を 3 秒間隔で確認、`ollamaUp` で false に戻す）
+  - `useChat(sessionId): { messages; send(content, files: File[]); stop(); streaming: boolean; warn: boolean; ollamaDown: boolean }`（`stop` は fetch を abort。`error ollama_down` または `too_heavy` を受けたら `ollamaDown=true` にし（バナー文言は spec 7.3）、`/api/health` を 3 秒間隔で確認、`ollamaUp` で false に戻す）
   - `MarkdownView({ text, streaming })`：react-markdown + remark-gfm + rehype-highlight。`rehype-raw` は使わない。`code` レンダラで `language-mermaid` かつ「`streaming && hasOpenFence(text)` で最後のブロック」でなければ `MermaidBlock`、それ以外は `CodeBlock`（コピーボタン付き）
   - `MermaidBlock({ code })`：`mermaid` を dynamic import し `mermaid.parse` → 失敗なら `CodeBlock` を表示（例外を外に出さない）。テーマはダーク判定で `dark` / `default`
 
@@ -459,6 +473,7 @@ it("PNG/JPEG/WebP 以外・10MB 超・5 枚目は追加されずエラー文言�
 it("error timeout を受けると打ち切りの文言を表示し、入力を再開できる")
 it("セッションのモデルが installed に無いと入力欄 disabled と『このモデルは削除されています』")   // Review Focus 3
 it("ollama_down を受けるとバナー表示、health が up でバナーが消える")                       // Review Focus 1
+it("too_heavy を受けるとバナー表示、health が up なら次の確認で消える")
 it("interrupted のメッセージに（中断）が付く")
 ```
 
@@ -470,13 +485,13 @@ it("interrupted のメッセージに（中断）が付く")
 
 **Files:**
 - Create: `scripts/start.sh`、`scripts/stop.sh`、`scripts/reset.sh`、`scripts/install-windows-shortcuts.sh`
-- Test: `scripts/tests/{start,stop,reset,lib}.bats`、`scripts/tests/stubs/docker`（呼ばれた引数をファイルに記録するだけの偽 `docker`）、`scripts/tests/run.sh`（shellcheck → bats をまとめて実行）
+- Test: `scripts/tests/{start,stop,reset,lib}.bats`、`scripts/tests/{bats,test_helper/bats-support,test_helper/bats-assert}`（git submodule）、`scripts/tests/stubs/docker`（呼ばれた引数をファイルに記録するだけの偽 `docker`）、`scripts/tests/run.sh`（shellcheck → bats をまとめて実行）
 
 **Interfaces:**
 - Consumes: `scripts/lib.sh`（Task 1）
 - Produces: Windows デスクトップの `LocalLLM-start.bat` / `LocalLLM-stop.bat` / `LocalLLM-reset.bat`
 
-- [ ] **Step 0: 失敗するテストを書く**（`PATH` の先頭に `scripts/tests/stubs` を置き、`docker` / `curl` / `cmd.exe` をスタブにする。bats-core はリポジトリに `scripts/tests/bats/` として git submodule で追加し、`sudo` を不要にする）
+- [ ] **Step 0: 失敗するテストを書く**（`PATH` の先頭に `scripts/tests/stubs` を置き、`docker` / `curl` / `cmd.exe` をスタブにする。bats-core・bats-support・bats-assert を git submodule で追加し、`sudo` を不要にする。**全スクリプトは環境変数 `LLM_APP_ROOT`（既定：リポジトリのルート）を基準に動き、テストでは一時ディレクトリを指定する**。理由：`reset.sh` のテストが本物の `data/` を消さないようにするため）
 
 ```bash
 @test "stop.sh は down に -v を付けない" { run scripts/stop.sh; refute_line --partial "down -v"; assert_success; }
@@ -487,13 +502,14 @@ it("interrupted のメッセージに（中断）が付く")
 @test "start.sh は frontend 起動済みなら up.sh を呼ばずブラウザだけ開く"
 @test "start.sh はポート 3000 使用中なら原因と対処の 2 行を出して失敗"
 @test "lib.sh fail は ✖ と → の 2 行を出し exit 1"
+@test "reset.sh を LLM_APP_ROOT=一時ディレクトリで実行すると、そこの data/ だけが消える"
 ```
 
 - [ ] **Step 0.5: 失敗を確認**　Run: `scripts/tests/run.sh`　Expected: FAIL（スクリプト未作成）
 - [ ] **Step 1: `start.sh`**：`cd` でリポジトリルートへ → `require_docker` → `.env` が無ければ `.env.example` からコピー → 既に `frontend` が running ならブラウザを開いて終了 → ポート 3000 使用中（`ss -ltn`）なら fail → `scripts/up.sh`（`data/` はここで `mkdir -p` する。コンテナの `node` ユーザー＝UID 1000 で書けるよう、Docker に作らせない）→ `curl localhost:3000/api/health` を 2 秒間隔・最大 2 分、待ち中は経過秒を表示 → `/mnt/c/Windows/System32/cmd.exe /c start http://localhost:3000`（`appendWindowsPath=false` のため絶対パス）
 - [ ] **Step 2: `stop.sh`**：`docker compose stop` → `docker compose down`（`-v` を付けない）。引数は受け付けない
-- [ ] **Step 3: `reset.sh`**：対象一覧と合計サイズを表示（`docker system df -v` から volume `local-llm-chat_ollama-models` のサイズ、`du -sh data/`）→ `RESET` 入力で実行：`docker compose kill` → `docker compose down -v --rmi local --remove-orphans` → `data/sessions/*`・`data/cache/*`・`data/tmp/*` を削除 → `docker buildx rm -f local-llm-chat`（専用ビルダーとそのビルドキャッシュを削除）→ `--with-images` のときだけ `docker image rm ollama/ollama:<タグ>`。最後に消えたものと「次は start で初回と同じように起動できます」を表示。`--dry-run` のときは一覧表示だけで終了（テストと事前確認用）
-- [ ] **Step 4: `install-windows-shortcuts.sh`**：Windows のデスクトップ（`cmd.exe /c echo %USERPROFILE%` → `wslpath`）に 3 つの `.bat` を生成。中身は `wsl.exe -d %WSL_DISTRO_NAME% --cd <repo の絶対パス> bash scripts/<x>.sh` と `pause`（`reset` は入力が要るのでウィンドウを残す）
+- [ ] **Step 3: `reset.sh`**：対象一覧と合計サイズを表示（`docker system df -v` から volume `local-llm-chat_ollama-models` のサイズ、`du -sh data/`）→ `RESET` 入力で実行：`docker compose kill` → `docker compose down -v --rmi local --remove-orphans` → `data/sessions/*`・`data/cache/*`・`data/tmp/*` を削除 → `docker buildx rm -f local-llm-chat`（専用ビルダーとそのビルドキャッシュを削除）→ E2E の残り（`docker compose -p local-llm-chat-e2e down -v --rmi local`）も削除 → `--with-images` のときだけ `docker image rm ollama/ollama:<タグ>`。最後に消えたものと「次は start で初回と同じように起動できます」を表示。`--dry-run` のときは一覧表示だけで終了（テストと事前確認用）
+- [ ] **Step 4: `install-windows-shortcuts.sh`**：Windows のデスクトップ（`cmd.exe /c echo %USERPROFILE%` → `wslpath`）に 3 つの `.bat` を生成。中身は `wsl.exe -d <生成時の $WSL_DISTRO_NAME の値> --cd <repo の絶対パス> bash scripts/<x>.sh` と `pause`（`%WSL_DISTRO_NAME%` は Windows 側に存在しないため、生成時に値を埋め込む）。`.bat` は CRLF・Shift_JIS 問題を避けるため英数字のみで書く（`reset` は入力が要るのでウィンドウを残す）
 - [ ] **Step 5: テスト通過を確認**　Run: `scripts/tests/run.sh`　Expected: shellcheck エラーなし、bats 全件 PASS
 - [ ] **Step 5.5: 実機確認**　Run: `scripts/stop.sh && scripts/start.sh && scripts/start.sh && scripts/reset.sh --dry-run`　Expected: `start` で health 待ち後ブラウザが開く、2 回目の `start` は起動し直さない、`--dry-run` は何も消さない
 - [ ] **Step 6: Commit**
@@ -501,7 +517,9 @@ it("interrupted のメッセージに（中断）が付く")
 ### Task 12: E2E テスト（偽 Ollama サーバー＋Playwright）とスモークテスト
 
 **Files:**
-- Create: `e2e/mock-ollama/server.mjs`（Node 標準の `http` のみ、依存なし）、`e2e/mock-ollama/Dockerfile`、`compose.e2e.yaml`（`ollama` サービスを偽サーバーに差し替え、`frontend` は `OLLAMA_URL=http://ollama:11434`、`/app/data` の bind mount を一時 volume `e2e-data` に差し替え、`IDLE_TIMEOUT_SEC=3`）
+- Create: `e2e/mock-ollama/server.mjs`（Node 標準の `http` のみ、依存なし）、`e2e/mock-ollama/Dockerfile`、`scripts/e2e.sh`、`compose.e2e.yaml`：
+  - `ollama`：`build: ./e2e/mock-ollama`、`gpus: !reset null`、`mem_limit: !reset null`、`healthcheck: !reset null`、`volumes: !reset []`（GPU の無い CI でも動かすため）、操作用に `ports: ["127.0.0.1:11500:11434"]`（Playwright から `/__mock/*` を呼ぶため。E2E のみ）
+  - `frontend`：`ports: !override ["127.0.0.1:3100:3000"]`（本番の 3000 と衝突させない）、`/app/data` を一時 volume `e2e-data` に差し替え、`environment: IDLE_TIMEOUT_SEC=3`
 - Create: `frontend/playwright.config.ts`、`frontend/e2e/{chat,models,sessions,attachments,recovery}.spec.ts`、`frontend/e2e/fixtures/{sample.png,big.png(10MB超),sample.gif}`、`frontend/e2e/smoke/real-ollama.spec.ts`
 - Modify: `frontend/package.json`（`"test:e2e"`、`"test:smoke"`）
 
@@ -509,7 +527,7 @@ it("interrupted のメッセージに（中断）が付く")
 - Consumes: 画面全体（Task 9・10）、`ChatEvent` と各 API（Task 3–8）
 - Produces: 偽サーバーの操作用 API（テストからのみ呼ぶ。`/__mock/*` は本物の Ollama に存在しないパス）
   - `POST /__mock/reset`：初期状態（installed = `gemma4:e4b`(6.6e9, capabilities `["completion","vision","thinking"]`)、`text-only:1b`(1e9, `["completion"]`)）
-  - `POST /__mock/script { thinking?: string; content: string; chunkDelayMs?: number; dropAfterChunks?: number; promptEvalCount?: number }`：次の `/api/chat` の応答内容
+  - `POST /__mock/script { thinking?: string; content: string; chunkDelayMs?: number; dropAfterChunks?: number; promptEvalCount?: number; failWith?: string }`：次の `/api/chat` の応答内容（`failWith` は Ollama と同じ形のエラー JSON を返す。例 `"model runner has unexpectedly stopped"`）
   - `POST /__mock/down` / `POST /__mock/up`：`/api/version` を含む全 API の停止・復帰（OOM 再起動の再現）
   - `POST /__mock/pull { totalBytes: number; stepMs: number; failAt?: number }`：次の `/api/pull` の進捗の出方
   - 本物と同じ形で応答するもの：`GET /api/version`、`GET /api/tags`、`POST /api/show`、`POST /api/chat`（NDJSON）、`POST /api/pull`（NDJSON）、`DELETE /api/delete`
@@ -548,10 +566,11 @@ test("text-only:1b では📎が disabled")
 // recovery.spec.ts
 test("応答中に dropAfterChunks＋/__mock/down → バナー表示、途中応答は（中断）で残る、/__mock/up でバナーが消え送信できる")  // Review Focus 1
 test("起動時に偽サーバーが down でも画面は表示され、up 後にモデル一覧が出る")                                     // Review Focus 5
+test("failWith でモデルの実行プロセス停止を再現 → バナー表示 → 自動で消え、再送できる")
 ```
 
 - [ ] **Step 3: 失敗を確認**　Run: `cd frontend && npm run test:e2e`　Expected: 未実装・不具合のあるものが FAIL（Task 9・10 完了済みなら、ここで見つかった不具合を直す）
-- [ ] **Step 4: 不具合を直し、全件 PASS を確認**　Run: `npm run test:e2e`　Expected: 全件 PASS。`test:e2e` は `docker compose -f compose.yaml -f compose.e2e.yaml -p local-llm-chat-e2e up -d --build` → Playwright → `down -v` を行う（本番のデータ・volume に触れないよう、プロジェクト名を分ける）
+- [ ] **Step 4: 不具合を直し、全件 PASS を確認**　Run: `npm run test:e2e`　Expected: 全件 PASS。`test:e2e` は `bash ../scripts/e2e.sh` を呼ぶ。`e2e.sh`：`source scripts/lib.sh` → `ensure_builder` → `docker compose -f compose.yaml -f compose.e2e.yaml -p local-llm-chat-e2e up -d --build` → `http://localhost:3100/api/health` を待つ → `npx playwright test`（`baseURL: http://localhost:3100`）→ 成否にかかわらず `down -v`（`trap`）。本番のデータ・volume・ポートに触れない
 - [ ] **Step 5: スモークテスト（実 Ollama・GPU）を書いて実行**　`real-ollama.spec.ts`：`gemma4:e4b` に「1+1は？」→ 60 秒以内に応答が完了する／`sample.png` を添付して応答が返る。Run: `scripts/start.sh && cd frontend && npm run test:smoke`　Expected: PASS
 - [ ] **Step 6: Commit**
 
@@ -574,7 +593,7 @@ test("起動時に偽サーバーが down でも画面は表示され、up 後�
 - [ ] **Step 2: spec 9 章の 1・2 を実行**　Run: `curl -s -o /dev/null -w "%{http_code}\n" localhost:3000 && /mnt/c/Windows/System32/curl.exe -s -o NUL -w "%{http_code}" http://localhost:3000`　Expected: `200` と `200`
 - [ ] **Step 3: 全テストを実行**　Run: `cd frontend && npm test && npm run test:e2e && npm run test:smoke && cd .. && scripts/tests/run.sh`　Expected: すべて PASS
 - [ ] **Step 3.5: spec 9 章の 3 を実機の画面で確認**（Playwright でスクリーンショットを残す。チャット、DL と中止、削除とデフォルトへの切替、リロード後の履歴、画像添付）
-- [ ] **Step 4: 高負荷確認（9 章の 6）**：`.env` を `OLLAMA_MEM_LIMIT=6g` にして `docker compose up -d` → `gemma4:12b` でチャット → Ollama が OOM で再起動（`docker compose ps` の RESTARTS 増加）、画面にバナー → 復帰後に解除、WSL のシェルが操作可能。終わったら `24g` に戻す
+- [ ] **Step 4: 高負荷確認（9 章の 6）**：`.env` を `OLLAMA_MEM_LIMIT=6g` にして `scripts/up.sh` → `gemma4:26b`（約 18GB。大半が CPU 側に載るため上限に確実に当たる）でチャット → Expected：次のいずれかになり、どちらでも画面にバナーが出て復帰後に消える。(a) Ollama が読み込みを拒否またはモデルの実行プロセスが落ちる（`too_heavy`）、(b) コンテナごと OOM で再起動（`docker compose ps` の RESTARTS が増える、`ollama_down`）。この間 WSL のシェルと Windows が操作できること。終わったら `24g` に戻して `scripts/up.sh`
 - [ ] **Step 5: ユーザーに依頼**：Windows で `LocalLLM-start.bat` / `LocalLLM-stop.bat` / `LocalLLM-reset.bat` をダブルクリックして 9 章の 4・5 を確認してもらう
 - [ ] **Step 6: CLAUDE.md の最終確認**：コマンド表とルールが実装と一致しているか見直す
 - [ ] **Step 7: Commit & push**　`git add -A && git commit -m "docs: README を追加" && git push`
