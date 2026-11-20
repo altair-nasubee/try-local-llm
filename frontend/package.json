@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "bash ../scripts/e2e.sh",
+    "test:smoke": "playwright test -c playwright.smoke.config.ts"
   },
   "dependencies": {
     "mermaid": "^12.3.0",
@@ -20,6 +22,7 @@
     "yaml": "^2.9.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.1",
     "@testing-library/jest-dom": "^8.0.0",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.13",

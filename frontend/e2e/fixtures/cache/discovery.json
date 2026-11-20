@@ -1,0 +1,14 @@
+{
+  "fetchedAt": "2026-11-20T00:00:00.000Z",
+  "families": [],
+  "models": [
+    {
+      "name": "gemma4:e2b",
+      "sizeBytes": 7200000000
+    },
+    {
+      "name": "gemma4:31b",
+      "sizeBytes": 20100000000
+    }
+  ]
+}
