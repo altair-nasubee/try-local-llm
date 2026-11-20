@@ -7,6 +7,8 @@ services:
     gpus: all
     # 重いモデルでメモリを使い切っても、止まるのはこのコンテナの中だけにする
     mem_limit: ${OLLAMA_MEM_LIMIT:-24g}
+    # swap に逃がさない（mem_limit だけだと同じ量の swap を使えてしまい、WSL 全体が重くなる）
+    memswap_limit: ${OLLAMA_MEM_LIMIT:-24g}
     environment:
       # 利用者は 1 人。複数モデルの同時読み込みや並列処理でメモリが倍増するのを防ぐ
       OLLAMA_MAX_LOADED_MODELS: "1"

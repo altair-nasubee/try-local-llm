@@ -8,6 +8,7 @@ services:
     # GPU の無い CI でも動かす
     gpus: !reset null
     mem_limit: !reset null
+    memswap_limit: !reset null
     healthcheck: !reset null
     volumes: !reset []
     # テストから /__mock/* を呼ぶための操作用ポート（E2E のみ）
