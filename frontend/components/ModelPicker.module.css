@@ -1,0 +1,63 @@
+.picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.label {
+  font-weight: 600;
+}
+
+.select {
+  min-width: 18rem;
+  max-width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font: inherit;
+}
+
+.lock {
+  color: var(--color-muted);
+  display: inline-flex;
+}
+
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-fg);
+  padding: 0;
+}
+
+.iconButton:not(:disabled):hover {
+  background: var(--color-surface-strong);
+}
+
+.popoverWrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 50;
+  width: min(360px, 80vw);
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  box-shadow: 0 4px 12px var(--color-overlay);
+  font-size: 0.9rem;
+}
