@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,7 +18,7 @@ vi.mock("@/lib/ollama", async (importOriginal) => ({
 }));
 
 const { POST } = await import("@/app/api/chat/route");
-const { createSession, getSession, saveImage, saveSession } = await import("@/lib/sessions");
+const { createSession, deleteSession, getSession, saveImage, saveSession } = await import("@/lib/sessions");
 const { OllamaHttpError, OllamaStreamError } = await import("@/lib/ollama");
 
 let dir: string;
@@ -309,6 +309,23 @@ describe("POST /api/chat", () => {
     });
     await new Promise((r) => setTimeout(r, 50));
     expect((await getSession(first.session.id))!.messages).toHaveLength(2);
+  });
+
+  it("応答中にセッションが削除されたら、中断の保存でフォルダを作り直さない", async () => {
+    mocks.chat.mockImplementation(async function* (_p: unknown, signal: AbortSignal) {
+      yield content("途中");
+      await waitForAbort(signal);
+    });
+    const client = new AbortController();
+    const res = await post({ model: "gemma4:e4b", content: "q" }, client.signal);
+    const lines = lineReader(res);
+    const first = (await lines.next()) as Extract<ChatEvent, { type: "session" }>;
+    await lines.next();
+    await deleteSession(first.session.id);
+    client.abort();
+    await new Promise((r) => setTimeout(r, 100));
+    await expect(getSession(first.session.id)).resolves.toBeNull();
+    expect(existsSync(path.join(dir, "sessions", first.session.id))).toBe(false);
   });
 
   describe("送信前のチェック", () => {

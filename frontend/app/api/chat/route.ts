@@ -131,7 +131,8 @@ export async function POST(req: Request) {
     s.messages.push(msg);
     s.updatedAt = msg.createdAt;
     if (contextTokens !== undefined) s.lastContextTokens = contextTokens;
-    await saveSession(s);
+    // 応答中に利用者がセッションを削除していたら、作り直さない
+    await saveSession(s, { mustExist: true });
   }
 
   const onClientGone = () => abort.abort(new Error("client disconnected"));

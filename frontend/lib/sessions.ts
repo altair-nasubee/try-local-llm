@@ -1,6 +1,6 @@
 // セッション履歴のファイル保存。1 セッション = ${dataDir}/sessions/<id>/session.json（画像も同じフォルダ）
 import { randomBytes } from "node:crypto";
-import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { getConfig } from "@/lib/config";
 import { t } from "@/lib/i18n";
@@ -54,15 +54,27 @@ export async function createSession(model: string, firstUserText: string): Promi
   return session;
 }
 
-// 一時ファイルに書いてから置き換える（書きかけを読ませない）。保存後に古いセッションを消す
-export async function saveSession(s: Session): Promise<void> {
+// 一時ファイルに書いてから置き換える（書きかけを読ませない）。保存後に古いセッションを消す。
+// mustExist のときは、フォルダが無ければ（利用者が削除済みなら）保存しない
+export async function saveSession(s: Session, opts: { mustExist?: boolean } = {}): Promise<boolean> {
   const dir = sessionDir(s.id);
+  if (opts.mustExist && !(await exists(dir))) return false;
   await mkdir(dir, { recursive: true });
   const file = path.join(dir, "session.json");
   const tmp = `${file}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
   await writeFile(tmp, JSON.stringify(s, null, 2));
   await rename(tmp, file);
   await prune(s.id);
+  return true;
+}
+
+async function exists(p: string): Promise<boolean> {
+  try {
+    await stat(p);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isSession(v: unknown): v is Session {
