@@ -204,4 +204,34 @@ describe("AppShell", () => {
     expect(picker()).toHaveValue("gemma4:12b"); // モデルは選んだまま（インストール済み）
     expect(picker()).toBeEnabled();
   });
+
+  it("最初の送信でセッションが作られ、一覧に出てプルダウンがロックされる", async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    server({
+      "POST /api/chat": () => {
+        sessions = [
+          { id: "20261121-000000-newone", title: "はじめまして", model: "gemma4:e4b", updatedAt: "2026-11-21T00:00:00Z" },
+          ...sessions,
+        ];
+        return new Response(
+          [
+            { type: "session", session: sessions[0] },
+            { type: "content", text: "こんにちは！" },
+            { type: "done", contextTokens: 1, contextLimit: 8192, warn: false },
+          ]
+            .map((e) => JSON.stringify(e))
+            .join("\n") + "\n",
+          { headers: { "content-type": "application/x-ndjson" } },
+        );
+      },
+    });
+    render(<AppShell />);
+    await waitFor(() => expect(picker()).toHaveValue("gemma4:e4b"));
+    await userEvent.type(screen.getByRole("textbox"), "はじめまして");
+    await userEvent.click(screen.getByRole("button", { name: "送信" }));
+    expect(await screen.findByText("こんにちは！")).toBeInTheDocument();
+    await waitFor(() => expect(sessionItems()).toHaveLength(3));
+    expect(screen.getByRole("button", { name: "はじめまして を開く" })).toHaveAttribute("aria-current", "true");
+    expect(picker()).toBeDisabled();
+  });
 });

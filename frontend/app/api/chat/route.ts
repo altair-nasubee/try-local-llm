@@ -92,10 +92,9 @@ export async function POST(req: Request) {
   }
 
   const catalog = await getCatalog();
-  // Ollama が止まっている間はモデルの有無が分からないので、閲覧のみ（409）にせず再起動中として返す
-  if (!catalog.ollamaUp) {
-    return new Response(line(errorEvent("ollama_down")), { headers: NDJSON_HEADERS });
-  }
+  // Ollama が止まっている間はモデルの有無が分からないので、閲覧のみ（409）にせず再起動中として返す。
+  // 質問は保存しない（画面は入力欄の文を残す）
+  if (!catalog.ollamaUp) return apiError(503, "ollama_down", t("ollama.restarting"));
   const entry = catalog.models.find((m) => m.name === model && m.installed);
   if (!entry) return apiError(409, "model_not_installed");
   if (images.length > 0 && !entry.capabilities.includes("vision")) return apiError(400, "no_vision");

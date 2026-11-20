@@ -8,6 +8,7 @@ import { formatGb } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import type { ModelEntry, SessionSummary } from "@/lib/types";
 import styles from "./AppShell.module.css";
+import { ChatView } from "./ChatView";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { DownloadDialog } from "./DownloadDialog";
 import { ModelPicker } from "./ModelPicker";
@@ -161,7 +162,20 @@ export function AppShell() {
             onDeleteRequest={(name) => setModelToDelete(models.find((m) => m.name === name) ?? null)}
           />
         </header>
-        <section className={styles.chat} aria-label={t("app.title")} />
+        <section className={styles.chat} aria-label={t("app.title")}>
+          <ChatView
+            sessionId={currentSessionId}
+            model={ui.selectedModel}
+            models={models}
+            ollamaUp={ollamaUp}
+            locked={ui.locked}
+            onSessionCreated={(s) => {
+              setCurrentSessionId(s.id);
+              void sessions.refresh();
+            }}
+            onDone={() => void sessions.refresh()}
+          />
+        </section>
       </main>
 
       <DownloadDialog

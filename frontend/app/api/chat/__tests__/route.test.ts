@@ -364,8 +364,9 @@ describe("POST /api/chat", () => {
       const s = await createSession("gemma4:12b", "q");
       mocks.isUp.mockResolvedValue(false);
       const res = await post({ sessionId: s.id, model: "gemma4:e4b", content: "q2" });
-      expect(res.status).toBe(200);
-      expect(await readEvents(res)).toEqual([{ type: "error", code: "ollama_down", message: expect.any(String) }]);
+      // 送っていないことが画面に分かるよう、ストリームではなく 503 で返す（入力欄の文を消さないため）
+      expect(res.status).toBe(503);
+      await expect(res.json()).resolves.toMatchObject({ error: "ollama_down" });
       expect((await getSession(s.id))!.messages).toHaveLength(0); // 送っていない質問は保存しない
       expect(mocks.chat).not.toHaveBeenCalled();
     });
