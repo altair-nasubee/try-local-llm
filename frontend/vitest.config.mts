@@ -16,6 +16,7 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: ["lib/**"],
+      exclude: ["lib/**/__tests__/**"],
       thresholds: { lines: 80 },
     },
   },
