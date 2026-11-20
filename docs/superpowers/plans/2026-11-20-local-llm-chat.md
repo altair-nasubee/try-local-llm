@@ -24,13 +24,27 @@
 - `stop.sh` はデータを消すオプションを持たない。`reset.sh` は `RESET` 入力時のみ実行
 - 各コミットの末尾に `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`
 
+## テストの全体像
+
+| 層 | 道具 | 置き場所 | コマンド | GPU / 実 Ollama | 担当タスク |
+|---|---|---|---|---|---|
+| 単体・API | Vitest（+ Testing Library） | `frontend/**/__tests__/` | `cd frontend && npm test` | 不要（モック） | 各タスクで TDD |
+| シェルスクリプト | bats-core + shellcheck | `scripts/tests/*.bats` | `scripts/tests/run.sh` | 不要（`docker` をスタブ） | Task 11 |
+| E2E（画面の通し操作） | Playwright + 偽 Ollama サーバー | `frontend/e2e/*.spec.ts`、`e2e/mock-ollama/` | `cd frontend && npm run test:e2e` | 不要 | Task 12 |
+| スモーク（実機） | Playwright | `frontend/e2e/smoke/*.spec.ts` | `cd frontend && npm run test:smoke` | 必要 | Task 12 |
+| CI | GitHub Actions | `.github/workflows/test.yml` | push / PR で自動 | 不要（スモークは除外） | Task 13 |
+
+- 各タスクの完了条件に「そのタスクの単体テストがすべて通る」ことを含める。タスクをまたぐ通し動作は E2E で確認する
+- 偽 Ollama サーバーは、応答内容・ダウンロード進捗・接続断・停止/復帰を外から操作できる。実モデルの出力は毎回違うため、画面の動作確認はこれで行い、実モデルはスモークで最小限だけ確認する
+- カバレッジ目標：`frontend/lib/` の行カバレッジ 80% 以上（`npm test -- --coverage`）
+
 ## Review Focus
 
-1. **Ollama がチャット中に OOM で落ちる**（7.3）→ 途中までの応答が `interrupted: true` で保存され、画面は「再起動中」バナー → health 復帰で解除。Task 8 / Task 10 にテストを置く
-2. **ダウンロード中にブラウザをリロード**（6.2）→ 進捗ダイアログが再表示され、操作禁止が継続。Task 5（サーバー状態）/ Task 9（初期表示で状態取得）にテスト
-3. **削除済みモデルの過去セッションを開く**（6.5）→ 入力欄無効＋説明表示。Task 10 にテスト
-4. **ストリーミング途中の未完 mermaid フェンス／壊れた mermaid**（6.4）→ コードのまま表示、例外を出さない。Task 10 にテスト
-5. **起動直後に Ollama がまだ応答しない**（デフォルトモデル自動 DL）→ 自動 DL はリトライし、画面の `/api/models` は Ollama 停止時も 200 で `ollamaUp: false` を返す。Task 3 / Task 5 にテスト
+1. **Ollama がチャット中に OOM で落ちる**（7.3）→ 途中までの応答が `interrupted: true` で保存され、画面は「再起動中」バナー → health 復帰で解除。Task 8 / Task 10 に単体テスト、Task 12 `recovery.spec.ts` に E2E
+2. **ダウンロード中にブラウザをリロード**（6.2）→ 進捗ダイアログが再表示され、操作禁止が継続。Task 5 / Task 9 に単体テスト、Task 12 `models.spec.ts` に E2E
+3. **削除済みモデルの過去セッションを開く**（6.5）→ 入力欄無効＋説明表示。Task 10 に単体テスト、Task 12 `sessions.spec.ts` に E2E
+4. **ストリーミング途中の未完 mermaid フェンス／壊れた mermaid**（6.4）→ コードのまま表示、例外を出さない。Task 10 に単体テスト、Task 12 `chat.spec.ts` に E2E
+5. **起動直後に Ollama がまだ応答しない**（デフォルトモデル自動 DL）→ 自動 DL はリトライし、画面の `/api/models` は Ollama 停止時も 200 で `ollamaUp: false` を返す。Task 3 / Task 5 に単体テスト、Task 12 `recovery.spec.ts` に E2E
 
 ---
 
@@ -46,7 +60,11 @@
 │   ├── lib.sh                # 共通関数（色付き出力、前提チェック、専用ビルダー）
 │   ├── up.sh                 # 専用ビルダーでビルドして compose up（開発・start.sh 共通）
 │   ├── start.sh / stop.sh / reset.sh
-│   └── install-windows-shortcuts.sh   # LocalLLM-start/stop/reset.bat をデスクトップに生成
+│   ├── install-windows-shortcuts.sh
+│   └── tests/                # bats テスト・docker スタブ（Task 11）   # LocalLLM-start/stop/reset.bat をデスクトップに生成
+├── compose.e2e.yaml          # E2E 用：ollama を偽サーバーに差し替え（Task 12）
+├── e2e/mock-ollama/          # 偽 Ollama サーバー（Task 12）
+├── .github/workflows/test.yml  # CI（Task 13）
 └── frontend/
     ├── Dockerfile
     ├── next.config.ts
@@ -76,6 +94,7 @@
     │   ├── markdown.ts       # 未完フェンス判定
     │   └── types.ts          # 共有型
     ├── components/ …         # Task 9 / 10
+    ├── e2e/                  # Playwright（Task 12）
     └── instrumentation.ts    # 起動時のデフォルトモデル自動 DL
 ```
 
@@ -451,27 +470,110 @@ it("interrupted のメッセージに（中断）が付く")
 
 **Files:**
 - Create: `scripts/start.sh`、`scripts/stop.sh`、`scripts/reset.sh`、`scripts/install-windows-shortcuts.sh`
-- Modify: `compose.yaml`（不要なら変更なし）
+- Test: `scripts/tests/{start,stop,reset,lib}.bats`、`scripts/tests/stubs/docker`（呼ばれた引数をファイルに記録するだけの偽 `docker`）、`scripts/tests/run.sh`（shellcheck → bats をまとめて実行）
 
 **Interfaces:**
 - Consumes: `scripts/lib.sh`（Task 1）
 - Produces: Windows デスクトップの `LocalLLM-start.bat` / `LocalLLM-stop.bat` / `LocalLLM-reset.bat`
 
+- [ ] **Step 0: 失敗するテストを書く**（`PATH` の先頭に `scripts/tests/stubs` を置き、`docker` / `curl` / `cmd.exe` をスタブにする。bats-core はリポジトリに `scripts/tests/bats/` として git submodule で追加し、`sudo` を不要にする）
+
+```bash
+@test "stop.sh は down に -v を付けない" { run scripts/stop.sh; refute_line --partial "down -v"; assert_success; }
+@test "stop.sh は引数を受け付けない"    { run scripts/stop.sh -v; assert_failure; }
+@test "reset.sh は RESET 以外の入力で何も消さない" { run bash -c 'echo yes | scripts/reset.sh'; assert_failure; [ ! -s "$DOCKER_CALLS" ] || ! grep -q "down" "$DOCKER_CALLS"; }
+@test "reset.sh --dry-run は消す対象を表示し docker を変更系で呼ばない" { run scripts/reset.sh --dry-run; assert_output --partial "local-llm-chat_ollama-models"; ! grep -qE "down|rm|kill" "$DOCKER_CALLS"; }
+@test "reset.sh は --with-images が無ければ ollama イメージを消さない" { run bash -c 'echo RESET | scripts/reset.sh'; ! grep -q "image rm ollama/ollama" "$DOCKER_CALLS"; }
+@test "start.sh は frontend 起動済みなら up.sh を呼ばずブラウザだけ開く"
+@test "start.sh はポート 3000 使用中なら原因と対処の 2 行を出して失敗"
+@test "lib.sh fail は ✖ と → の 2 行を出し exit 1"
+```
+
+- [ ] **Step 0.5: 失敗を確認**　Run: `scripts/tests/run.sh`　Expected: FAIL（スクリプト未作成）
 - [ ] **Step 1: `start.sh`**：`cd` でリポジトリルートへ → `require_docker` → `.env` が無ければ `.env.example` からコピー → 既に `frontend` が running ならブラウザを開いて終了 → ポート 3000 使用中（`ss -ltn`）なら fail → `scripts/up.sh`（`data/` はここで `mkdir -p` する。コンテナの `node` ユーザー＝UID 1000 で書けるよう、Docker に作らせない）→ `curl localhost:3000/api/health` を 2 秒間隔・最大 2 分、待ち中は経過秒を表示 → `/mnt/c/Windows/System32/cmd.exe /c start http://localhost:3000`（`appendWindowsPath=false` のため絶対パス）
 - [ ] **Step 2: `stop.sh`**：`docker compose stop` → `docker compose down`（`-v` を付けない）。引数は受け付けない
-- [ ] **Step 3: `reset.sh`**：対象一覧と合計サイズを表示（`docker system df -v` から volume `local-llm-chat_ollama-models` のサイズ、`du -sh data/`）→ `RESET` 入力で実行：`docker compose kill` → `docker compose down -v --rmi local --remove-orphans` → `data/sessions/*`・`data/cache/*`・`data/tmp/*` を削除 → `docker buildx rm -f local-llm-chat`（専用ビルダーとそのビルドキャッシュを削除）→ `--with-images` のときだけ `docker image rm ollama/ollama:<タグ>`。最後に消えたものと「次は start で初回と同じように起動できます」を表示
+- [ ] **Step 3: `reset.sh`**：対象一覧と合計サイズを表示（`docker system df -v` から volume `local-llm-chat_ollama-models` のサイズ、`du -sh data/`）→ `RESET` 入力で実行：`docker compose kill` → `docker compose down -v --rmi local --remove-orphans` → `data/sessions/*`・`data/cache/*`・`data/tmp/*` を削除 → `docker buildx rm -f local-llm-chat`（専用ビルダーとそのビルドキャッシュを削除）→ `--with-images` のときだけ `docker image rm ollama/ollama:<タグ>`。最後に消えたものと「次は start で初回と同じように起動できます」を表示。`--dry-run` のときは一覧表示だけで終了（テストと事前確認用）
 - [ ] **Step 4: `install-windows-shortcuts.sh`**：Windows のデスクトップ（`cmd.exe /c echo %USERPROFILE%` → `wslpath`）に 3 つの `.bat` を生成。中身は `wsl.exe -d %WSL_DISTRO_NAME% --cd <repo の絶対パス> bash scripts/<x>.sh` と `pause`（`reset` は入力が要るのでウィンドウを残す）
-- [ ] **Step 5: 確認**　Run: `bash -n scripts/*.sh && shellcheck scripts/*.sh && scripts/stop.sh && scripts/start.sh`　Expected: shellcheck エラーなし、`start` で health 待ち後ブラウザが開く、2 回目の `start` は起動し直さない
+- [ ] **Step 5: テスト通過を確認**　Run: `scripts/tests/run.sh`　Expected: shellcheck エラーなし、bats 全件 PASS
+- [ ] **Step 5.5: 実機確認**　Run: `scripts/stop.sh && scripts/start.sh && scripts/start.sh && scripts/reset.sh --dry-run`　Expected: `start` で health 待ち後ブラウザが開く、2 回目の `start` は起動し直さない、`--dry-run` は何も消さない
 - [ ] **Step 6: Commit**
 
-### Task 12: 完成確認（spec 9 章）と README
+### Task 12: E2E テスト（偽 Ollama サーバー＋Playwright）とスモークテスト
+
+**Files:**
+- Create: `e2e/mock-ollama/server.mjs`（Node 標準の `http` のみ、依存なし）、`e2e/mock-ollama/Dockerfile`、`compose.e2e.yaml`（`ollama` サービスを偽サーバーに差し替え、`frontend` は `OLLAMA_URL=http://ollama:11434`、`/app/data` の bind mount を一時 volume `e2e-data` に差し替え、`IDLE_TIMEOUT_SEC=3`）
+- Create: `frontend/playwright.config.ts`、`frontend/e2e/{chat,models,sessions,attachments,recovery}.spec.ts`、`frontend/e2e/fixtures/{sample.png,big.png(10MB超),sample.gif}`、`frontend/e2e/smoke/real-ollama.spec.ts`
+- Modify: `frontend/package.json`（`"test:e2e"`、`"test:smoke"`）
+
+**Interfaces:**
+- Consumes: 画面全体（Task 9・10）、`ChatEvent` と各 API（Task 3–8）
+- Produces: 偽サーバーの操作用 API（テストからのみ呼ぶ。`/__mock/*` は本物の Ollama に存在しないパス）
+  - `POST /__mock/reset`：初期状態（installed = `gemma4:e4b`(6.6e9, capabilities `["completion","vision","thinking"]`)、`text-only:1b`(1e9, `["completion"]`)）
+  - `POST /__mock/script { thinking?: string; content: string; chunkDelayMs?: number; dropAfterChunks?: number; promptEvalCount?: number }`：次の `/api/chat` の応答内容
+  - `POST /__mock/down` / `POST /__mock/up`：`/api/version` を含む全 API の停止・復帰（OOM 再起動の再現）
+  - `POST /__mock/pull { totalBytes: number; stepMs: number; failAt?: number }`：次の `/api/pull` の進捗の出方
+  - 本物と同じ形で応答するもの：`GET /api/version`、`GET /api/tags`、`POST /api/show`、`POST /api/chat`（NDJSON）、`POST /api/pull`（NDJSON）、`DELETE /api/delete`
+  - モデル検索（discovery）は E2E では `DISCOVERY_TTL_HOURS` 内の固定キャッシュ `cache/discovery.json` を `docker compose cp` で `e2e-data` volume に事前配置して外部通信させない（`fetchedAt` はテスト開始時刻）
+
+- [ ] **Step 1: 偽サーバーを作り、単体で確認**　Run: `node e2e/mock-ollama/server.mjs & sleep 1; curl -s localhost:11434/api/tags; curl -sN -XPOST localhost:11434/api/chat -d '{"model":"gemma4:e4b","messages":[],"stream":true}'`　Expected: tags に 2 件、chat は NDJSON で `done:true` まで流れる
+- [ ] **Step 2: E2E テストを書く**（各 spec の `beforeEach` で `/__mock/reset` とデータ一時 volume の掃除）
+
+```ts
+// chat.spec.ts
+test("送信すると応答が逐次表示され、完了後にプルダウンが 🔒 になる")
+test("思考過程が『考え中…（クリックで展開）』で折りたたまれ、クリックで開く")
+test("表・チェックボックス・言語付きコードブロック（コピーボタン）が整形表示される")
+test("mermaid ブロックは完了後に svg になり、壊れた mermaid はコードのまま")
+test("<script>alert(1)</script> を含む応答で dialog が発生しない")
+test("[停止] で応答が止まり（中断）が付く")
+test("chunkDelayMs が IDLE_TIMEOUT_SEC を超えると打ち切り文言が出る")   // compose.e2e.yaml で IDLE_TIMEOUT_SEC=3
+test("promptEvalCount が NUM_CTX×0.8 以上で長さ警告が出て、送信は可能")
+// models.spec.ts
+test("未DLモデル選択→ダイアログ→ダウンロード→進捗→完了で一覧更新・選択状態")
+test("ダウンロード中は [中止] 以外が押せず、[中止] で解除")
+test("ダウンロード中にリロードしても進捗ダイアログが再表示される")            // Review Focus 2
+test("pull 失敗（failAt）でエラー文が出て操作禁止が解除される")
+test("選択中モデルを削除→確認→デフォルトモデルに切替。デフォルトはゴミ箱 disabled")
+test("（！）で models.yaml の説明が出る")
+test("excluded サイズの discovered モデルは一覧に出ない")
+// sessions.spec.ts
+test("リロード後もセッション一覧と会話が残る")
+test("11 件目作成で最古が消え、開いているセッションは消えない")
+test("一覧のゴミ箱→確認でセッションが消える")
+test("削除済みモデルのセッションは入力欄 disabled と説明文")                   // Review Focus 3
+// attachments.spec.ts
+test("PNG を📎・ドラッグ＆ドロップ・貼り付けで添付し、送信後も画像が表示される")
+test("GIF・10MB 超・5 枚目は拒否される")
+test("text-only:1b では📎が disabled")
+// recovery.spec.ts
+test("応答中に dropAfterChunks＋/__mock/down → バナー表示、途中応答は（中断）で残る、/__mock/up でバナーが消え送信できる")  // Review Focus 1
+test("起動時に偽サーバーが down でも画面は表示され、up 後にモデル一覧が出る")                                     // Review Focus 5
+```
+
+- [ ] **Step 3: 失敗を確認**　Run: `cd frontend && npm run test:e2e`　Expected: 未実装・不具合のあるものが FAIL（Task 9・10 完了済みなら、ここで見つかった不具合を直す）
+- [ ] **Step 4: 不具合を直し、全件 PASS を確認**　Run: `npm run test:e2e`　Expected: 全件 PASS。`test:e2e` は `docker compose -f compose.yaml -f compose.e2e.yaml -p local-llm-chat-e2e up -d --build` → Playwright → `down -v` を行う（本番のデータ・volume に触れないよう、プロジェクト名を分ける）
+- [ ] **Step 5: スモークテスト（実 Ollama・GPU）を書いて実行**　`real-ollama.spec.ts`：`gemma4:e4b` に「1+1は？」→ 60 秒以内に応答が完了する／`sample.png` を添付して応答が返る。Run: `scripts/start.sh && cd frontend && npm run test:smoke`　Expected: PASS
+- [ ] **Step 6: Commit**
+
+### Task 13: CI（GitHub Actions）
+
+**Files:**
+- Create: `.github/workflows/test.yml`
+
+- [ ] **Step 1: ワークフローを書く**：`push` と `pull_request` で、ジョブ ① `unit`：Node 22 → `npm ci` → `npm test -- --coverage`（`frontend/lib` 80% 未満で失敗）→ `npm run lint`、② `scripts`：`scripts/tests/run.sh`、③ `e2e`：`npx playwright install --with-deps chromium` → `npm run test:e2e`、失敗時は Playwright レポートを artifact に保存。スモークは CI で実行しない（GPU が無いため）
+- [ ] **Step 2: push して確認**　Run: `git push && gh run watch`　Expected: 3 ジョブとも成功
+- [ ] **Step 3: README と CLAUDE.md にテストコマンドを追記**（`npm test` / `npm run test:e2e` / `npm run test:smoke` / `scripts/tests/run.sh`）
+- [ ] **Step 4: Commit**
+
+### Task 14: 完成確認（spec 9 章）と README
 
 **Files:**
 - Create: `README.md`（前提、`setup.sh` → `start` の手順、`.env` 項目、`models.yaml` の書き方、スクリプト一覧）
 
 - [ ] **Step 1: README を書く**
 - [ ] **Step 2: spec 9 章の 1・2 を実行**　Run: `curl -s -o /dev/null -w "%{http_code}\n" localhost:3000 && /mnt/c/Windows/System32/curl.exe -s -o NUL -w "%{http_code}" http://localhost:3000`　Expected: `200` と `200`
-- [ ] **Step 3: spec 9 章の 3 を Playwright で確認**（チャット、DL と中止、削除とデフォルトへの切替、リロード後の履歴、画像添付）。各項目のスクリーンショットを残す
+- [ ] **Step 3: 全テストを実行**　Run: `cd frontend && npm test && npm run test:e2e && npm run test:smoke && cd .. && scripts/tests/run.sh`　Expected: すべて PASS
+- [ ] **Step 3.5: spec 9 章の 3 を実機の画面で確認**（Playwright でスクリーンショットを残す。チャット、DL と中止、削除とデフォルトへの切替、リロード後の履歴、画像添付）
 - [ ] **Step 4: 高負荷確認（9 章の 6）**：`.env` を `OLLAMA_MEM_LIMIT=6g` にして `docker compose up -d` → `gemma4:12b` でチャット → Ollama が OOM で再起動（`docker compose ps` の RESTARTS 増加）、画面にバナー → 復帰後に解除、WSL のシェルが操作可能。終わったら `24g` に戻す
 - [ ] **Step 5: ユーザーに依頼**：Windows で `LocalLLM-start.bat` / `LocalLLM-stop.bat` / `LocalLLM-reset.bat` をダブルクリックして 9 章の 4・5 を確認してもらう
 - [ ] **Step 6: CLAUDE.md の最終確認**：コマンド表とルールが実装と一致しているか見直す

@@ -18,6 +18,8 @@ Ollama（GPU）＋ Next.js のローカル LLM チャットアプリ。Docker Co
 - 共有型は `frontend/lib/types.ts` に集約。同じ型を別の場所で定義しない
 - 応答の Markdown で HTML を描画しない（`rehype-raw` 禁止）
 - TDD：失敗するテスト → 実装 → 通過、の順。タスクごとにコミット
+- 画面の動作確認は偽 Ollama（`e2e/mock-ollama/`）を使う E2E で行う。実モデルの出力に依存するテストを E2E に書かない
+- E2E は compose プロジェクト名 `local-llm-chat-e2e` で動かし、本番のデータ・volume に触れない
 - データを消す操作は `scripts/reset.sh`（`RESET` 入力が必要）だけ。`stop.sh` や他の処理に削除を足さない
 
 ## コマンド
@@ -27,6 +29,9 @@ Ollama（GPU）＋ Next.js のローカル LLM チャットアプリ。Docker Co
 | 起動（ビルド込み・ブラウザなし） | `scripts/up.sh` |
 | 起動（ブラウザも開く）／終了 | `scripts/start.sh` ／ `scripts/stop.sh` |
 | 単体テスト | `cd frontend && npm test` |
+| E2E（偽 Ollama・GPU 不要） | `cd frontend && npm run test:e2e` |
+| スモーク（実 Ollama・GPU） | `cd frontend && npm run test:smoke` |
+| スクリプトのテスト | `scripts/tests/run.sh` |
 | ログ | `docker compose logs -f frontend` / `docker compose logs -f ollama` |
 | Ollama の確認 | `docker compose exec ollama ollama list` |
 
