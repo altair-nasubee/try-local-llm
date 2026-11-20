@@ -42,6 +42,7 @@ beforeEach(() => {
     cancel: vi.fn(() => {
       state = { status: "idle" };
     }),
+    fail: vi.fn(),
   };
   globalThis.__downloadManager = manager;
 });

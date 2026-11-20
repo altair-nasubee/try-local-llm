@@ -1,7 +1,7 @@
 "use client";
 // チャットの送受信。/api/chat の NDJSON（ChatEvent）を受けて表示用の発言を組み立てる
 import { useCallback, useEffect, useRef, useState } from "react";
-import { t } from "@/lib/i18n";
+import { errorText, t } from "@/lib/i18n";
 import { readNdjson } from "@/lib/ndjson";
 import type { ChatEvent, ChatMessage, Session, SessionSummary } from "@/lib/types";
 
@@ -163,7 +163,7 @@ export function useChat(
           // 本文なし
         }
         if (body.error === "ollama_down") setOllamaDown(true);
-        else setError(body.message ?? t("chat.failed", { detail: body.error ?? `HTTP ${res.status}` }));
+        else setError(errorText(body.error, body.message ?? t("chat.failed", { detail: `HTTP ${res.status}` })));
         return false;
       }
       void consume(res, gen);

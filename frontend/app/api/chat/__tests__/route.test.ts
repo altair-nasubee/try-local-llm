@@ -110,6 +110,7 @@ beforeEach(() => {
     isBusy: () => busy,
     start: vi.fn(),
     cancel: vi.fn(),
+    fail: vi.fn(),
   };
 });
 afterEach(() => {

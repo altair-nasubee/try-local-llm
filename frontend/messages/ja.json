@@ -43,6 +43,7 @@
   "chat.attachSize": "画像は 1 枚 10MB までです（{name}）",
   "chat.attachCount": "1 回に添付できる画像は 4 枚までです",
   "chat.empty": "質問を入力して送信してください",
+  "chat.needDownload": "{name} はまだダウンロードされていません。ダウンロードすると使えます",
   "session.list": "セッション",
   "session.open": "{title} を開く",
   "session.deleteOne": "{title} を削除",
@@ -51,5 +52,13 @@
   "session.deleteConfirm": "「{title}」を削除しますか？",
   "session.modelDeleted": "このモデルは削除されています",
   "session.imageOnlyTitle": "画像の質問",
-  "ollama.restarting": "モデルが重すぎて停止しました。再起動中です"
+  "ollama.restarting": "モデルが重すぎて停止しました。再起動中です",
+  "error.busy": "ダウンロード中のため操作できません",
+  "error.model_not_installed": "このモデルはダウンロードされていません",
+  "error.no_vision": "このモデルは画像に対応していません",
+  "error.invalid_image": "添付できない画像があります（PNG・JPEG・WebP、10MB まで）",
+  "error.too_many_images": "1 回に添付できる画像は 4 枚までです",
+  "error.empty": "質問を入力してください",
+  "error.not_found": "この会話は見つかりません（削除された可能性があります）",
+  "error.unknown_model": "一覧にないモデルです"
 }

@@ -13,3 +13,10 @@ export function t(key: MessageKey, vars?: Record<string, string | number>): stri
     Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : whole,
   );
 }
+
+// API のエラーコードを画面の文言にする。対応する文言が無ければ fallback（サーバーの説明）か汎用の文言
+export function errorText(code: string | undefined, fallback?: string): string {
+  const key = `error.${code}`;
+  if (code && Object.prototype.hasOwnProperty.call(messages, key)) return messages[key as MessageKey];
+  return fallback ?? t("chat.failed", { detail: code ?? "" });
+}

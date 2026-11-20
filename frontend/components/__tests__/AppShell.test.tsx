@@ -234,4 +234,13 @@ describe("AppShell", () => {
     expect(screen.getByRole("button", { name: "はじめまして を開く" })).toHaveAttribute("aria-current", "true");
     expect(picker()).toBeDisabled();
   });
+
+  it("起動時にデフォルトモデルが未ダウンロードなら、チャット欄からダウンロードダイアログを開ける", async () => {
+    models.models[0] = entry("gemma4:e4b", 6.6, false);
+    server();
+    render(<AppShell />);
+    await waitFor(() => expect(picker()).toHaveValue("gemma4:e4b"));
+    await userEvent.click(within(screen.getByRole("region")).getByRole("button", { name: "ダウンロード" }));
+    expect(screen.getByRole("dialog")).toHaveTextContent("gemma4:e4b はダウンロードされていません");
+  });
 });

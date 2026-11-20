@@ -231,4 +231,28 @@ describe("ensureDefaultModel（起動時の自動ダウンロード）", () => {
       }),
     ).resolves.toBeUndefined();
   });
+
+  it("空き容量不足で始められなかったら、エラーとして残す（画面に出すため）", async () => {
+    const fail = vi.fn();
+    await ensureDefaultModel({
+      defaultModel: "gemma4:e4b",
+      isUp: async () => true,
+      getCatalog: async () => catalog(false),
+      start: async () => ({ ok: false, code: "disk", message: "空きが足りません" }),
+      fail,
+      sleep: async () => {},
+    });
+    expect(fail).toHaveBeenCalledWith("gemma4:e4b", "空きが足りません");
+  });
+});
+
+describe("DownloadManager.fail", () => {
+  it("error 状態にし、cancel で idle に戻る", () => {
+    const m = createDownloadManager({ pull: vi.fn(), freeBytes: async () => 1, dataDir: "/d" });
+    m.fail("a:1b", "空きが足りません");
+    expect(m.state()).toEqual({ status: "error", model: "a:1b", message: "空きが足りません" });
+    expect(m.isBusy()).toBe(false);
+    m.cancel();
+    expect(m.state()).toEqual({ status: "idle" });
+  });
 });

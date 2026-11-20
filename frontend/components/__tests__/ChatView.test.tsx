@@ -64,6 +64,7 @@ function setup(over: Partial<Parameters<typeof ChatView>[0]> = {}) {
     locked: false,
     onSessionCreated: vi.fn(),
     onDone: vi.fn(),
+    onRequestDownload: vi.fn(),
     ...over,
   };
   const r = render(<ChatView {...props} />);
@@ -321,5 +322,24 @@ describe("ChatView", () => {
   it("ダウンロード中（locked）は入力できない", () => {
     setup({ locked: true });
     expect(input()).toBeDisabled();
+  });
+
+  it("新しいチャットで未ダウンロードのモデルなら、入力できずダウンロードを案内する", async () => {
+    const { props } = setup({
+      model: "gemma4:e4b",
+      models: models.map((m) => (m.name === "gemma4:e4b" ? { ...m, installed: false } : m)),
+    });
+    expect(input()).toBeDisabled();
+    expect(screen.getByText(/gemma4:e4b はまだダウンロードされていません/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "ダウンロード" }));
+    expect(props.onRequestDownload).toHaveBeenCalledWith("gemma4:e4b");
+  });
+
+  it("送信前のエラーはコードではなく日本語の説明で出す", async () => {
+    mockFetch({ "POST /api/chat": () => jsonRes({ error: "model_not_installed" }, 409) });
+    setup();
+    await send("q");
+    expect(await screen.findByRole("alert")).toHaveTextContent("このモデルはダウンロードされていません");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("model_not_installed");
   });
 });

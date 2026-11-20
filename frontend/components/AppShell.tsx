@@ -174,6 +174,7 @@ export function AppShell() {
               void sessions.refresh();
             }}
             onDone={() => void sessions.refresh()}
+            onRequestDownload={selectModel}
           />
         </section>
       </main>

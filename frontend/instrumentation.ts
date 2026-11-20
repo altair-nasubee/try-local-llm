@@ -20,5 +20,6 @@ export async function register() {
     isUp,
     getCatalog,
     start: (model, bytes) => getDownloadManager().start(model, bytes),
+    fail: (model, message) => getDownloadManager().fail(model, message),
   });
 }

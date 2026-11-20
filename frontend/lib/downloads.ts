@@ -15,6 +15,8 @@ export type DownloadManager = {
   start(model: string, expectedBytes: number | null): Promise<StartResult>;
   cancel(): void;
   isBusy(): boolean;
+  // 始められなかったことをエラーとして残す（起動時の自動ダウンロード用。画面のダイアログに出る）
+  fail(model: string, message: string): void;
 };
 
 type Deps = {
@@ -106,6 +108,11 @@ export function createDownloadManager(deps: Deps): DownloadManager {
       controller = null;
       current = { status: "idle" };
     },
+
+    fail(model, message) {
+      if (isBusy()) return;
+      current = { status: "error", model, message };
+    },
   };
 }
 
@@ -128,7 +135,8 @@ export async function ensureDefaultModel(deps: {
   defaultModel: string;
   isUp: () => Promise<boolean>;
   getCatalog: () => Promise<ModelsResponse>;
-  start: (model: string, expectedBytes: number | null) => Promise<unknown>;
+  start: (model: string, expectedBytes: number | null) => Promise<StartResult>;
+  fail?: (model: string, message: string) => void;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
 }): Promise<void> {
@@ -142,7 +150,11 @@ export async function ensureDefaultModel(deps: {
         // 一覧の取得中に Ollama が落ちたら、未インストールと判定せず待ち直す
         if (catalog.ollamaUp) {
           const entry = catalog.models.find((m) => m.name === deps.defaultModel);
-          if (!entry?.installed) await deps.start(deps.defaultModel, entry?.sizeBytes ?? null);
+          if (!entry?.installed) {
+            const result = await deps.start(deps.defaultModel, entry?.sizeBytes ?? null);
+            // 空き容量不足などで始められなかったら、画面に出す（spec 11-5）
+            if (!result.ok && result.code === "disk") deps.fail?.(deps.defaultModel, result.message);
+          }
           return;
         }
       }

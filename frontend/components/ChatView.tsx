@@ -17,6 +17,7 @@ export function ChatView(props: {
   locked: boolean; // ダウンロード中
   onSessionCreated(s: SessionSummary): void;
   onDone(): void;
+  onRequestDownload(model: string): void;
 }) {
   const chat = useChat(props.sessionId, {
     model: props.model,
@@ -33,6 +34,9 @@ export function ChatView(props: {
   const restarting = chat.ollamaDown || !props.ollamaUp;
   // 削除済みモデルの過去セッションは閲覧のみ。Ollama が止まっている間は有無が分からないので判定しない（spec 11-12）
   const readOnly = !restarting && props.models.length > 0 && props.sessionId !== null && !entry?.installed;
+  // 新しいチャットで未ダウンロードのモデル（起動時の自動ダウンロードを中止した場合など）は、ダウンロードを案内する
+  const needDownload =
+    !restarting && props.models.length > 0 && props.sessionId === null && !!props.model && !entry?.installed;
   const canAttach = !!entry?.capabilities.includes("vision");
 
   return (
@@ -57,8 +61,21 @@ export function ChatView(props: {
         </p>
       )}
       {readOnly && <p className={styles.readOnly}>{t("session.modelDeleted")}</p>}
+      {needDownload && (
+        <p className={styles.readOnly}>
+          {t("chat.needDownload", { name: props.model })}{" "}
+          <button
+            type="button"
+            className={styles.inlineButton}
+            disabled={props.locked}
+            onClick={() => props.onRequestDownload(props.model)}
+          >
+            {t("download.start")}
+          </button>
+        </p>
+      )}
       <Composer
-        disabled={props.locked || readOnly || restarting}
+        disabled={props.locked || readOnly || restarting || needDownload}
         canAttach={canAttach}
         streaming={chat.streaming}
         onSend={chat.send}
