@@ -92,3 +92,44 @@ export async function* pull(name: string, signal: AbortSignal): AsyncIterable<Pu
   if (!res.body) throw new Error("Ollama の応答が空です");
   yield* readNdjson<PullEvent>(res.body);
 }
+
+// 200 のストリームの途中に来た {"error": "…"} の行
+export class OllamaStreamError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "OllamaStreamError";
+  }
+}
+
+export type OllamaChatMessage = { role: "user" | "assistant"; content: string; images?: string[] };
+
+export type OllamaChatChunk = {
+  message?: { role?: string; content?: string; thinking?: string };
+  done?: boolean;
+  prompt_eval_count?: number;
+  eval_count?: number;
+  error?: string;
+};
+
+// チャット。images は base64。中止は signal で行う
+export async function* chat(
+  params: { model: string; messages: OllamaChatMessage[]; think: boolean; numCtx: number },
+  signal: AbortSignal,
+): AsyncIterable<OllamaChatChunk> {
+  const res = await request("/api/chat", {
+    method: "POST",
+    body: JSON.stringify({
+      model: params.model,
+      messages: params.messages,
+      think: params.think,
+      stream: true,
+      options: { num_ctx: params.numCtx },
+    }),
+    signal,
+  });
+  if (!res.body) throw new Error("Ollama の応答が空です");
+  for await (const chunk of readNdjson<OllamaChatChunk>(res.body)) {
+    if (chunk.error) throw new OllamaStreamError(chunk.error);
+    yield chunk;
+  }
+}

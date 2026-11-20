@@ -1,5 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { deleteModel, isUp, listInstalled, OllamaHttpError, pull, readNdjson, showModel } from "@/lib/ollama";
+import {
+  chat,
+  deleteModel,
+  isUp,
+  listInstalled,
+  OllamaHttpError,
+  OllamaStreamError,
+  pull,
+  readNdjson,
+  showModel,
+} from "@/lib/ollama";
 import { downFetch, fakeFetch, json } from "./helpers/fake-fetch";
 
 beforeEach(() => {
@@ -95,6 +105,65 @@ describe("ollama client", () => {
       { status: "pulling a", digest: "a", total: 10, completed: 5 },
       { status: "success" },
     ]);
+  });
+});
+
+describe("chat", () => {
+  const signal = () => new AbortController().signal;
+  const params = {
+    model: "gemma4:e4b",
+    messages: [{ role: "user" as const, content: "hi", images: ["AAAA"] }],
+    think: true,
+    numCtx: 8192,
+  };
+
+  it("stream:true・think・num_ctx を付けて POST し、チャンクを返す", async () => {
+    const f = fakeFetch({
+      "POST /api/chat": () =>
+        new Response(
+          '{"message":{"role":"assistant","content":"","thinking":"ふむ"},"done":false}\n' +
+            '{"message":{"role":"assistant","content":"こん"},"done":false}\n' +
+            '{"message":{"role":"assistant","content":""},"done":true,"prompt_eval_count":10,"eval_count":5}\n',
+        ),
+    });
+    vi.stubGlobal("fetch", f.fetch);
+    const chunks = [];
+    for await (const c of chat(params, signal())) chunks.push(c);
+    expect(f.calls[0].body).toEqual({
+      model: "gemma4:e4b",
+      messages: [{ role: "user", content: "hi", images: ["AAAA"] }],
+      think: true,
+      stream: true,
+      options: { num_ctx: 8192 },
+    });
+    expect(chunks).toHaveLength(3);
+    expect(chunks[2]).toMatchObject({ done: true, prompt_eval_count: 10, eval_count: 5 });
+  });
+
+  it("HTTP エラーは error の文を持つ OllamaHttpError", async () => {
+    vi.stubGlobal(
+      "fetch",
+      fakeFetch({ "POST /api/chat": () => json({ error: "model requires more system memory" }, 500) }).fetch,
+    );
+    const it = chat(params, signal())[Symbol.asyncIterator]();
+    await expect(it.next()).rejects.toThrow(/requires more system memory/);
+  });
+
+  it("ストリームの途中の error 行は OllamaStreamError", async () => {
+    vi.stubGlobal(
+      "fetch",
+      fakeFetch({
+        "POST /api/chat": () =>
+          new Response('{"message":{"content":"a"},"done":false}\n{"error":"model runner has unexpectedly stopped"}\n'),
+      }).fetch,
+    );
+    const got: unknown[] = [];
+    const err = await (async () => {
+      for await (const c of chat(params, signal())) got.push(c);
+    })().catch((e: unknown) => e);
+    expect(got).toHaveLength(1);
+    expect(err).toBeInstanceOf(OllamaStreamError);
+    expect((err as Error).message).toBe("model runner has unexpectedly stopped");
   });
 });
 
