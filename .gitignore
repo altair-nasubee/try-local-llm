@@ -4,7 +4,8 @@
 !.env.example
 
 # セッション履歴・添付画像などの実行時データ
-data/
+data/*
+!data/.gitkeep
 
 # Node.js / Next.js
 node_modules/

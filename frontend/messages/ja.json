@@ -1,0 +1,50 @@
+{
+  "app.title": "ローカル LLM チャット",
+
+  "model.label": "モデル",
+  "model.installed": "✅ すぐ使える",
+  "model.notInstalled": "⬇ 未ダウンロード",
+  "model.slow": "遅くなります",
+  "model.locked": "このチャットではモデルを変更できません",
+  "model.helpButton": "一覧にないモデルを使うには",
+  "model.help": "一覧にないモデルを使いたいときは、models.yaml にモデルの種類を追記してください。次回の起動時に、このPCで使えるサイズのモデルを検索して一覧に追加します",
+  "model.size": "サイズ：約{size}GB",
+  "model.sizeUnknown": "サイズ：不明",
+
+  "download.confirmTitle": "{name} はダウンロードされていません",
+  "download.start": "ダウンロード",
+  "download.running": "ダウンロード中…",
+  "download.progress": "{percent}%（{done}/{total}GB）",
+  "download.abort": "中止",
+  "download.failed": "ダウンロードに失敗しました",
+  "download.noSpace": "ディスクの空き容量が足りません（必要：約{need}GB、空き：約{free}GB）",
+
+  "delete.confirmTitle": "{name} を削除しますか？（約{size}GB解放）",
+  "delete.confirm": "削除する",
+  "delete.button": "モデルを削除",
+  "delete.defaultModel": "デフォルトモデルは削除できません",
+  "delete.failed": "削除に失敗しました",
+
+  "common.cancel": "キャンセル",
+  "common.close": "閉じる",
+
+  "chat.newChat": "新しいチャット",
+  "chat.inputPlaceholder": "メッセージを入力…",
+  "chat.send": "送信",
+  "chat.stop": "停止",
+  "chat.you": "あなた",
+  "chat.assistant": "AI",
+  "chat.thinking": "考え中…（クリックで展開）",
+  "chat.interrupted": "（中断）",
+  "chat.contextWarn": "会話が長くなりました。新しいチャットをおすすめします",
+  "chat.copy": "コピー",
+  "chat.copied": "コピーしました",
+
+  "session.list": "セッション",
+  "session.delete": "セッションを削除",
+  "session.deleteConfirm": "「{title}」を削除しますか？",
+  "session.modelDeleted": "このモデルは削除されています",
+  "session.imageOnlyTitle": "画像の質問",
+
+  "ollama.restarting": "モデルが重すぎて停止しました。再起動中です"
+}

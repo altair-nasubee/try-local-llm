@@ -1,0 +1,8 @@
+# ホストの node_modules（Node 24 で入れたもの）がコンテナ内の npm ci の結果を上書きしないようにする
+node_modules
+.next
+e2e
+coverage
+test-results
+playwright-report
+.env*

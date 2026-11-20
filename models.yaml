@@ -1,0 +1,8 @@
+# 画面のモデル一覧に並べる候補。
+# families：起動時に新しいサイズの版を ollama.com から探すモデルの種類（ここに追記すると次回の起動時に検索する）
+# models  ：直接並べるモデル。sizeGb はダウンロード前の負荷区分の判定に使うおおよそのサイズ
+families: [gemma4, qwen3, llama3.1]
+models:
+  - { name: "gemma4:e4b", sizeGb: 6.6 }
+  - { name: "gemma4:12b", sizeGb: 8.0 }
+  - { name: "gemma4:26b", sizeGb: 18 }

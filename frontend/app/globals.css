@@ -1,0 +1,112 @@
+/*
+ * 色はすべてここの CSS 変数で管理する。コンポーネントでは var(--…) だけを使う。
+ * テーマは "system" | "light" | "dark"（lib/theme.ts）。今回は "system" 固定で、
+ * 将来の手動切り替えでは <html data-theme="light|dark"> を付ける。
+ */
+:root {
+  color-scheme: light;
+  --color-bg: #ffffff;
+  --color-fg: #1f2328;
+  --color-muted: #59636e;
+  --color-surface: #f6f8fa;
+  --color-surface-strong: #eaeef2;
+  --color-border: #d1d9e0;
+  --color-accent: #0969da;
+  --color-accent-fg: #ffffff;
+  --color-danger: #cf222e;
+  --color-danger-fg: #ffffff;
+  --color-warn-bg: #fff8c5;
+  --color-warn-fg: #6a4b00;
+  --color-ok: #1a7f37;
+  --color-user-bubble: #ddf4ff;
+  --color-code-bg: #f6f8fa;
+  --color-overlay: rgba(31, 35, 40, 0.5);
+  --color-progress: #0969da;
+  --color-progress-track: #eaeef2;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --color-bg: #0d1117;
+    --color-fg: #e6edf3;
+    --color-muted: #9198a1;
+    --color-surface: #151b23;
+    --color-surface-strong: #212830;
+    --color-border: #3d444d;
+    --color-accent: #4493f8;
+    --color-accent-fg: #0d1117;
+    --color-danger: #f85149;
+    --color-danger-fg: #0d1117;
+    --color-warn-bg: #3b2e00;
+    --color-warn-fg: #f2cc60;
+    --color-ok: #3fb950;
+    --color-user-bubble: #12263f;
+    --color-code-bg: #151b23;
+    --color-overlay: rgba(1, 4, 9, 0.7);
+    --color-progress: #4493f8;
+    --color-progress-track: #212830;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-bg: #0d1117;
+  --color-fg: #e6edf3;
+  --color-muted: #9198a1;
+  --color-surface: #151b23;
+  --color-surface-strong: #212830;
+  --color-border: #3d444d;
+  --color-accent: #4493f8;
+  --color-accent-fg: #0d1117;
+  --color-danger: #f85149;
+  --color-danger-fg: #0d1117;
+  --color-warn-bg: #3b2e00;
+  --color-warn-fg: #f2cc60;
+  --color-ok: #3fb950;
+  --color-user-bubble: #12263f;
+  --color-code-bg: #151b23;
+  --color-overlay: rgba(1, 4, 9, 0.7);
+  --color-progress: #4493f8;
+  --color-progress-track: #212830;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  color: var(--color-fg);
+  background: var(--color-bg);
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    "Hiragino Sans",
+    "Noto Sans JP",
+    Meiryo,
+    sans-serif;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--color-accent);
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}

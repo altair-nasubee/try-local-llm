@@ -1,0 +1,46 @@
+# 起動は scripts/up.sh（専用ビルダーでビルドする）か scripts/start.sh を使う
+name: local-llm-chat
+
+services:
+  ollama:
+    image: ollama/ollama:0.40.16
+    gpus: all
+    # 重いモデルでメモリを使い切っても、止まるのはこのコンテナの中だけにする
+    mem_limit: ${OLLAMA_MEM_LIMIT:-24g}
+    environment:
+      # 利用者は 1 人。複数モデルの同時読み込みや並列処理でメモリが倍増するのを防ぐ
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_NUM_PARALLEL: "1"
+    volumes:
+      - ollama-models:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    # ポートはホストに公開しない（frontend だけが内部ネットワークで呼ぶ）
+
+  frontend:
+    build: ./frontend
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # .env の PORT / BIND_ADDRESS はホスト側の公開先。コンテナ内は常に 0.0.0.0:3000 で待ち受ける
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${PORT:-3000}:3000"
+    volumes:
+      - ./data:/app/data
+      - ./models.yaml:/app/models.yaml:ro
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        # Ollama が起動しきっていなくても画面は動く必要があるため、healthy は待たない
+        condition: service_started
+
+volumes:
+  ollama-models:
