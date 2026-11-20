@@ -58,3 +58,37 @@ export async function isUp(): Promise<boolean> {
     return false;
   }
 }
+
+// NDJSON（1 行 1 JSON）のストリームを 1 行ずつ返す。行がチャンクをまたいでも正しく区切る
+export async function* readNdjson<T>(body: ReadableStream<Uint8Array>): AsyncIterable<T> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, nl).trim();
+        buffer = buffer.slice(nl + 1);
+        if (line) yield JSON.parse(line) as T;
+      }
+    }
+    buffer += decoder.decode();
+    const rest = buffer.trim();
+    if (rest) yield JSON.parse(rest) as T;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+export type PullEvent = { status: string; digest?: string; completed?: number; total?: number; error?: string };
+
+// モデルのダウンロード。進捗を 1 行ずつ返す。中止は signal で行う
+export async function* pull(name: string, signal: AbortSignal): AsyncIterable<PullEvent> {
+  const res = await request("/api/pull", { method: "POST", body: JSON.stringify({ model: name, stream: true }), signal });
+  if (!res.body) throw new Error("Ollama の応答が空です");
+  yield* readNdjson<PullEvent>(res.body);
+}

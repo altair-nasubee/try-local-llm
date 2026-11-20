@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { deleteModel, isUp, listInstalled, OllamaHttpError, showModel } from "@/lib/ollama";
+import { deleteModel, isUp, listInstalled, OllamaHttpError, pull, readNdjson, showModel } from "@/lib/ollama";
 import { downFetch, fakeFetch, json } from "./helpers/fake-fetch";
 
 beforeEach(() => {
@@ -77,5 +77,61 @@ describe("ollama client", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("pull は stream:true で POST し、NDJSON を 1 行ずつ返す", async () => {
+    const f = fakeFetch({
+      "POST /api/pull": () =>
+        new Response(
+          '{"status":"pulling manifest"}\n{"status":"pulling a","digest":"a","total":10,"completed":5}\n{"status":"success"}\n',
+        ),
+    });
+    vi.stubGlobal("fetch", f.fetch);
+    const events = [];
+    for await (const e of pull("gemma4:e4b", new AbortController().signal)) events.push(e);
+    expect(f.calls[0]).toEqual({ method: "POST", path: "/api/pull", body: { model: "gemma4:e4b", stream: true } });
+    expect(events).toEqual([
+      { status: "pulling manifest" },
+      { status: "pulling a", digest: "a", total: 10, completed: 5 },
+      { status: "success" },
+    ]);
+  });
+});
+
+describe("readNdjson", () => {
+  function streamOf(chunks: string[]) {
+    const enc = new TextEncoder();
+    return new ReadableStream<Uint8Array>({
+      start(c) {
+        for (const ch of chunks) c.enqueue(enc.encode(ch));
+        c.close();
+      },
+    });
+  }
+
+  it("1 行が 2 チャンクに分かれても、1 チャンクに 2 行あっても 1 行ずつ返す", async () => {
+    const out = [];
+    for await (const v of readNdjson<{ n: number }>(streamOf(['{"n":1}\n{"n"', ':2}\n{"n":3}\n']))) out.push(v);
+    expect(out).toEqual([{ n: 1 }, { n: 2 }, { n: 3 }]);
+  });
+
+  it("最後の行に改行が無くても返し、空行は飛ばす", async () => {
+    const out = [];
+    for await (const v of readNdjson<{ n: number }>(streamOf(['{"n":1}\n\n', '{"n":2}']))) out.push(v);
+    expect(out).toEqual([{ n: 1 }, { n: 2 }]);
+  });
+
+  it("マルチバイト文字がチャンクの境目で分かれても壊れない", async () => {
+    const bytes = new TextEncoder().encode('{"t":"日本語"}\n');
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(bytes.slice(0, 9));
+        c.enqueue(bytes.slice(9));
+        c.close();
+      },
+    });
+    const out = [];
+    for await (const v of readNdjson<{ t: string }>(stream)) out.push(v);
+    expect(out).toEqual([{ t: "日本語" }]);
   });
 });
