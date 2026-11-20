@@ -32,6 +32,7 @@
 - 本文サイズ：`/api/chat` は画像 4 枚×10MB を受け取るため、Next.js の本文サイズ上限（proxy を通るリクエストは既定 10MB）を `next.config.ts` で 50MB に上げる（設定名はインストールされた Next.js の版のドキュメントで確認する）
 - Ollama が止まっている間（`ollamaUp: false`）は「未インストール」と判定しない。画面は削除済み表示・閲覧のみ・ダウンロードダイアログを出さず、再起動中のバナーだけを出す。API は 409（閲覧のみ）ではなく `ollama_down` を返す（Ollama 再起動中に全セッションが「削除されています」になるのを防ぐ）
 - compose の `env_file` は `- { path: .env, required: false }`（`.env` の無い CI・初回でも `docker compose up` が失敗しないため）
+- `lib/` と Route Handler はモジュールの読み込み時に設定ファイル・`/app/data`・Ollama に触れない（`getConfig()` や `loadYaml()` は関数の中で呼ぶ）。`next build` はページ情報の収集で Route Handler を読み込むため、Docker のビルド中（`/app/models.yaml` も Ollama も無い）に失敗する
 
 ## テストの全体像
 
@@ -319,7 +320,7 @@ it("refreshDiscovery の同時呼び出しは 1 回だけ検索する")
   - `ollama.pull(name, signal): AsyncIterable<{status:string; completed?:number; total?:number; error?:string}>`（`POST /api/pull`、`stream: true`、`readNdjson` でパース）
   - `getDownloadManager(): DownloadManager`（`globalThis.__downloadManager` に保持）
     - `state(): DownloadState`
-    - `start(model: string, expectedBytes: number | null): { ok: true } | { ok: false; code: "busy" | "disk" ; message: string }`
+    - `start(model: string, expectedBytes: number | null): Promise<{ ok: true } | { ok: false; code: "busy" | "disk" ; message: string }>`（空き容量の確認 `freeBytes` が非同期のため。`busy` の判定と「確認中」の印は `await` の前に同期的に行い、同時に 2 回呼ばれても 1 つしか始まらないようにする）
     - `cancel(): void`（`running` なら中止して `idle`。`error` / `done` なら `idle` に戻すだけ＝エラー表示を閉じる操作）
     - `isBusy(): boolean`
   - `freeBytes(path: string): Promise<number>`（`fs.statfs`、`bavail * bsize`）
@@ -331,6 +332,7 @@ it("refreshDiscovery の同時呼び出しは 1 回だけ検索する")
 ```ts
 it("進捗を state に反映し、完了で done になる")
 it("実行中に start すると busy を返す")
+it("start を await せずに 2 回続けて呼んでも、2 回目は busy")
 it("空き容量 < expectedBytes * 1.1 なら disk を返し開始しない")
 it("cancel で AbortSignal が発火し state が idle に戻る")
 it("pull が error 行を返したら state は error（message 付き）")
@@ -474,6 +476,7 @@ it("locked 中は [中止] 以外のボタンが disabled")
 it("削除確認で [削除する] → 選択中モデルならデフォルトモデルに切り替わり、会話中だったなら新しいチャットになる")
 it("アプリを開いた直後は新しいチャット（空）＋デフォルトモデル。過去のセッションは一覧から開く")
 it("DownloadState が error ならダイアログにエラー文を出し、閉じると locked が解除される")
+it("POST が 507（空き容量不足）・409 を返したら、ダイアログにその理由を出し、ダウンロードは始まらない")   // spec 6.2。state は idle のままなので、POST の応答で表示する
 it("ollamaUp:false のときは選択中モデルが未インストール扱いでも DownloadDialog を開かない")
 it("表示中のセッションを一覧から削除すると新しいチャット（空）になる")
 ```
@@ -532,7 +535,7 @@ it("interrupted のメッセージに（中断）が付く")
 - Consumes: `scripts/lib.sh`（Task 1）
 - Produces: Windows デスクトップの `LocalLLM-start.bat` / `LocalLLM-stop.bat` / `LocalLLM-reset.bat`
 
-- [ ] **Step 0: 失敗するテストを書く**（`PATH` の先頭に `scripts/tests/stubs` を置き、`docker` / `curl` / `ss` / `cmd.exe` をスタブにする。`docker` スタブは `STUB_FRONTEND_RUNNING=1` のとき `docker compose ps` に `frontend` の running 行を返す。`ss` は環境変数 `STUB_PORT_BUSY=1` のとき `127.0.0.1:3000` の LISTEN 行を返す（ポート使用中のテストを実機のポート状況に左右させないため）。`cmd.exe` は `start.sh` が絶対パス `/mnt/c/Windows/System32/cmd.exe` で呼ぶため、そのパスは環境変数 `WIN_CMD`（既定は絶対パス）で差し替えられるようにし、テストではスタブを指す。bats-core・bats-support・bats-assert を git submodule で追加し、`sudo` を不要にする。**全スクリプトは環境変数 `LLM_APP_ROOT`（既定：リポジトリのルート）を基準に動き、テストでは一時ディレクトリを指定する**。理由：`reset.sh` のテストが本物の `data/` を消さないようにするため。`setup()` で一時ディレクトリに `.env.example` のコピーと `data/sessions/x/session.json` を作り、スクリプトは `"$BATS_TEST_DIRNAME/../stop.sh"` のように絶対パスで呼ぶ（`bats` を実行した場所に左右されないため。下の例では短く `scripts/stop.sh` と書く））
+- [ ] **Step 0: 失敗するテストを書く**（`PATH` の先頭に `scripts/tests/stubs` を置き、`docker` / `curl` / `ss` / `cmd.exe` をスタブにする。`docker` スタブは `STUB_FRONTEND_RUNNING=1` のとき `docker compose ps` に `frontend` の running 行を返す。`ss` は環境変数 `STUB_PORT_BUSY=1` のとき `127.0.0.1:3000` の LISTEN 行を返す（ポート使用中のテストを実機のポート状況に左右させないため）。`cmd.exe` は `start.sh` が絶対パス `/mnt/c/Windows/System32/cmd.exe` で呼ぶため、そのパスは環境変数 `WIN_CMD`（既定は絶対パス）で差し替えられるようにし、テストではスタブを指す。`pkill` もスタブにする（`stop.sh` のテストで実機のプロセスを終わらせないため）。bats-core・bats-support・bats-assert を git submodule で追加し、`sudo` を不要にする。**全スクリプトは環境変数 `LLM_APP_ROOT`（既定：リポジトリのルート）を基準に動き、テストでは一時ディレクトリを指定する**。理由：`reset.sh` のテストが本物の `data/` を消さないようにするため。`setup()` で一時ディレクトリに `.env.example` のコピーと `data/sessions/x/session.json` を作り、スクリプトは `"$BATS_TEST_DIRNAME/../stop.sh"` のように絶対パスで呼ぶ（`bats` を実行した場所に左右されないため。下の例では短く `scripts/stop.sh` と書く））
 
 ```bash
 @test "stop.sh は down に -v を付けない" { run scripts/stop.sh; assert_success; grep -q "compose down" "$DOCKER_CALLS"; ! grep -q -- "-v" "$DOCKER_CALLS"; }   # docker の引数は画面ではなく $DOCKER_CALLS に残るので、そちらを調べる
@@ -548,11 +551,13 @@ it("interrupted のメッセージに（中断）が付く")
 
 - [ ] **Step 0.5: 失敗を確認**　Run: `scripts/tests/run.sh`　Expected: FAIL（スクリプト未作成）
 - [ ] **Step 1: `start.sh`**：`cd "$LLM_APP_ROOT"` → `require_docker` → `.env` が無ければ `.env.example` からコピー → `.env` の `PORT`（無ければ 3000）を `grep '^PORT='` で読む（`.env` を `source` しない。以下 `$PORT`）→ 既に `frontend` が running ならブラウザを開いて終了 → ポート `$PORT` 使用中（`ss -ltn`）なら fail → `"$LLM_SCRIPTS_DIR/up.sh"`（`data/` はここで `mkdir -p` する。コンテナの `node` ユーザー＝UID 1000 で書けるよう、Docker に作らせない）→ `curl localhost:$PORT/api/health` を 2 秒間隔・最大 2 分、待ち中は経過秒を表示 → `"$WIN_CMD" /c start http://localhost:$PORT`（`WIN_CMD` 既定 `/mnt/c/Windows/System32/cmd.exe`。`appendWindowsPath=false` のため絶対パス）
-- [ ] **Step 2: `stop.sh`**：`docker compose stop` → `docker compose down`（`-v` を付けない）。引数は受け付けない
+- [ ] **Step 2: `stop.sh`**：`docker compose stop` → `docker compose down`（`-v` を付けない）→ 下の Step 4 の常駐プロセスを `pkill -f '^local-llm-chat-keepalive'` で終わらせる（見つからなくても成功扱い）。引数は受け付けない
 - [ ] **Step 3: `reset.sh`**：対象一覧と合計サイズを表示（`docker system df -v` から volume `local-llm-chat_ollama-models` のサイズ、`du -sh data/`）→ `RESET` 入力で実行（それ以外の入力なら何もせず exit 1）：`docker compose --project-directory "$LLM_APP_ROOT" kill` → `docker compose --project-directory "$LLM_APP_ROOT" down -v --rmi local --remove-orphans` → `data/sessions/*`・`data/cache/*`・`data/tmp/*` を削除（spec 8.5 の「ダウンロード中の印」は、この設計ではサーバーのメモリにしか無いのでファイルは消さなくてよい。「中断したダウンロードの残り」は ollama の volume ごと消える） → `docker buildx rm -f local-llm-chat`（専用ビルダーとそのビルドキャッシュを削除）→ E2E の残り（`docker compose -f compose.yaml -f compose.e2e.yaml -p local-llm-chat-e2e down -v --rmi all`。`-f` で E2E 用ファイルも読ませないと、そこでだけ定義した volume `e2e-data` が消えない。`--rmi all` は、偽 Ollama のイメージに名前を付けているため `local` では消えないから。E2E プロジェクトのイメージは偽 Ollama と E2E 用 frontend だけなので、本物の Ollama イメージは消えない）も削除 → `--with-images` のときだけ `docker image rm ollama/ollama:<タグ>`（タグは `docker compose config --images` から取る。`compose.yaml` を書き換えても追従するため）。最後に消えたものと「次は start で初回と同じように起動できます」を表示。`--dry-run` のときは一覧表示だけで終了（テストと事前確認用）
-- [ ] **Step 4: `install-windows-shortcuts.sh`**：Windows のデスクトップに 3 つの `.bat` を生成。デスクトップの場所は `/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -Command "[Console]::OutputEncoding=[Text.Encoding]::UTF8; [Environment]::GetFolderPath('Desktop')"` で取得し、末尾の `\r` を除いて `wslpath` で変換する（`%USERPROFILE%\Desktop` 決め打ちだと OneDrive にデスクトップを移している PC で見えない場所に置かれるため。UTF-8 指定は日本語のユーザー名で文字化けしないため）。中身は `wsl.exe -d <生成時の $WSL_DISTRO_NAME の値> --cd <repo の絶対パス> bash scripts/<x>.sh` と `pause`（`%WSL_DISTRO_NAME%` は Windows 側に存在しないため、生成時に値を埋め込む）。`.bat` は改行を CRLF で書き（`printf '...\r\n'`）、文字化けを避けるため中身は英数字のみにする（`reset` は入力が要るのでウィンドウを残す）
+- [ ] **Step 4: `install-windows-shortcuts.sh`**：Windows のデスクトップに 3 つの `.bat` を生成。デスクトップの場所は `/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -Command "[Console]::OutputEncoding=[Text.Encoding]::UTF8; [Environment]::GetFolderPath('Desktop')"` で取得し、末尾の `\r` を除いて `wslpath` で変換する（`%USERPROFILE%\Desktop` 決め打ちだと OneDrive にデスクトップを移している PC で見えない場所に置かれるため。UTF-8 指定は日本語のユーザー名で文字化けしないため）。中身は `wsl.exe -d <生成時の $WSL_DISTRO_NAME の値> --cd <repo の絶対パス> bash scripts/<x>.sh` と `pause`（`%WSL_DISTRO_NAME%` は Windows 側に存在しないため、生成時に値を埋め込む）。
+  - **WSL を止めないための常駐**：WSL は、Windows 側から起動した `wsl.exe` がすべて終わると、systemd のサービス（Docker）が動いていてもディストリビューションを止める。そのため `.bat` のウィンドウを閉じた数十秒後に、アプリも止まる（開発中は Claude Code や端末が WSL を開いているので気づきにくい）。`LocalLLM-start.bat` は `start.sh` が成功したら、`powershell.exe -NoProfile -WindowStyle Hidden -Command "Start-Process wsl.exe -WindowStyle Hidden -ArgumentList '-d','<distro>','--exec','bash','-c','pgrep -f ^local-llm-chat-keepalive >/dev/null || exec -a local-llm-chat-keepalive sleep infinity'"` で、見えない常駐プロセスを 1 つだけ起動する（2 回目以降は既存があるので何もしない）。`stop.sh` がこれを終わらせる。端末から `start.sh` を直接使う場合は、端末を開いている間だけ動く（README に書く）`.bat` は改行を CRLF で書き（`printf '...\r\n'`）、文字化けを避けるため中身は英数字のみにする（`reset` は入力が要るのでウィンドウを残す）
 - [ ] **Step 5: テスト通過を確認**　Run: `scripts/tests/run.sh`　Expected: shellcheck エラーなし、bats 全件 PASS
 - [ ] **Step 5.5: 実機確認**　Run: `scripts/stop.sh && scripts/start.sh && scripts/start.sh && scripts/reset.sh --dry-run`　Expected: `start` で health 待ち後ブラウザが開く、2 回目の `start` は起動し直さない、`--dry-run` は何も消さない
+- [ ] **Step 5.6: 常駐の確認をユーザーに依頼**：Windows で `LocalLLM-start.bat` を実行してウィンドウを閉じ、WSL の端末もすべて閉じて 2 分待ってから、ブラウザで `http://localhost:3000` が開けること。続けて `LocalLLM-stop.bat` の後に `wsl.exe -l --running`（PowerShell）で、しばらくするとディストリビューションが止まること（常駐が残っていない確認）
 - [ ] **Step 6: Commit**
 
 ### Task 12: E2E テスト（偽 Ollama サーバー＋Playwright）とスモークテスト
