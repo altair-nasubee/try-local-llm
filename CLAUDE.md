@@ -17,6 +17,7 @@ Ollama（GPU）＋ Next.js のローカル LLM チャットアプリ。Docker Co
 - Ollama のポートはホストに公開しない。`frontend` は `${BIND_ADDRESS:-127.0.0.1}:${PORT:-3000}` で公開
 - 共有型は `frontend/lib/types.ts` に集約。同じ型を別の場所で定義しない
 - 応答の Markdown で HTML を描画しない（`rehype-raw` 禁止）
+- API が受け取るセッション ID・画像ファイル名・モデル名は必ず形式チェックする（形式は実装計画の Global Constraints）
 - TDD：失敗するテスト → 実装 → 通過、の順。タスクごとにコミット
 - 画面の動作確認は偽 Ollama（`e2e/mock-ollama/`）を使う E2E で行う。実モデルの出力に依存するテストを E2E に書かない
 - E2E は compose プロジェクト名 `local-llm-chat-e2e`・ポート 3100 で動かし、本番のデータ・volume・ポートに触れない

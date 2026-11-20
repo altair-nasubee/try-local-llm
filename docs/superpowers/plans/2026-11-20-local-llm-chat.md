@@ -18,12 +18,16 @@
 - `frontend` のポート公開は `${BIND_ADDRESS:-127.0.0.1}:${PORT:-3000}:3000`（spec 8.1）
 - compose のプロジェクト名は `local-llm-chat` 固定（reset.sh がこの名前で対象を絞る）。E2E は `local-llm-chat-e2e`・ポート 3100
 - スクリプトはすべて `LLM_APP_ROOT`（既定：リポジトリのルート）を基準に動く
+- Ollama コンテナの環境変数：`OLLAMA_MAX_LOADED_MODELS=1`・`OLLAMA_NUM_PARALLEL=1`（複数モデルの同時読み込みや並列処理でメモリが倍増し、メモリ上限に当たるのを防ぐ。利用者は 1 人のため）
 - `.env` の項目と既定値：`DEFAULT_MODEL=gemma4:e4b` / `OLLAMA_MEM_LIMIT=24g` / `IDLE_TIMEOUT_SEC=180` / `NUM_CTX=8192` / `CONTEXT_WARN_RATIO=0.8` / `TIER_COMFORT_MAX_GB=7` / `TIER_EXCLUDE_MIN_GB=20` / `DISCOVERY_TTL_HOURS=24` / `DISCOVERY_ENABLED=true` / `SESSION_LIMIT=10` / `BIND_ADDRESS=127.0.0.1` / `PORT=3000`
 - 負荷区分：サイズ ≤ 7GB → `comfort`、7GB < サイズ < 20GB → `slow`、≥ 20GB → `excluded`（一覧に出さない）。1GB = 1e9 bytes
 - 画像：PNG / JPEG / WebP、1 枚 10MB まで、1 回 4 枚まで
 - 応答に含まれる HTML は描画しない（`rehype-raw` を使わない）
 - `stop.sh` はデータを消すオプションを持たない。`reset.sh` は `RESET` 入力時のみ実行
 - 各コミットの末尾に `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`
+- API の Route Handler はすべて `export const runtime = "nodejs"` と `export const dynamic = "force-dynamic"`（ストリーミングと `fs` を使い、応答をキャッシュさせないため）
+- API が受け取る識別子は必ず形式チェックする：セッション ID は `/^\d{8}-\d{6}-[a-z0-9]{6}$/`、画像ファイル名は `/^img-\d+\.(png|jpg|webp)$/`、モデル名は `/^[a-z0-9._-]+(\/[a-z0-9._-]+)?:[a-z0-9._-]+$/`。合わなければ 400（パスの書き換えでフォルダ外を読ませないため）
+- 本文サイズ：`/api/chat` は画像 4 枚×10MB を受け取るため、Next.js の本文サイズ上限（proxy を通るリクエストは既定 10MB）を `next.config.ts` で 50MB に上げる（設定名はインストールされた Next.js の版のドキュメントで確認する）
 
 ## テストの全体像
 
@@ -169,7 +173,7 @@ export type ChatEvent =
 **Interfaces:**
 - Produces:
   - `getConfig(): AppConfig`（`AppConfig = { ollamaUrl; defaultModel; numCtx; idleTimeoutSec; contextWarnRatio; tierComfortMaxGb; tierExcludeMinGb; discoveryTtlHours; discoveryEnabled; sessionLimit; dataDir; modelsYamlPath }`。`ollamaUrl` 既定 `http://ollama:11434`、`dataDir` 既定 `/app/data`、`modelsYamlPath` 既定 `/app/models.yaml`）
-  - `t(key: MessageKey, vars?: Record<string,string|number>): string`（`MessageKey = keyof typeof ja`、`{name}` 形式で置換）
+  - `t(key: MessageKey, vars?: Record<string,string|number>): string`（`ja.json` は入れ子にせず `"download.confirmTitle": "…"` のような平らなキーにする。`MessageKey = keyof typeof ja`、`{name}` 形式で置換）
   - `type Theme = "system" | "light" | "dark"`、`getTheme(): Theme`（常に `"system"`）
   - `lib/types.ts`（上記の共有型）
 
@@ -197,7 +201,7 @@ it("変数を置換する", () => expect(t("download.confirmTitle", { name: "x" 
 - [ ] **Step 5: テスト通過を確認**　Run: `npm test`　Expected: PASS
 - [ ] **Step 6: Docker 一式**
   - `frontend/Dockerfile`：`node:22-bookworm-slim` のマルチステージ、standalone 出力をコピー、`RUN mkdir -p /app/data && chown node:node /app/data`（名前付き volume をマウントしたときも node ユーザーで書けるようにするため）、`EXPOSE 3000`、`USER node`
-  - `compose.yaml`：`name: local-llm-chat`。`ollama`：`image: ollama/ollama:<固定タグ>`（`gh release view -R ollama/ollama --json tagName` で最新の安定版を調べて固定）、`gpus: all`、`mem_limit: ${OLLAMA_MEM_LIMIT:-24g}`、`restart: unless-stopped`、volume `ollama-models:/root/.ollama`、`healthcheck: ollama list`、ポート公開なし。`frontend`：`build: ./frontend`、`env_file: .env`、`ports: ["${BIND_ADDRESS:-127.0.0.1}:${PORT:-3000}:3000"]`、`volumes: ["./data:/app/data", "./models.yaml:/app/models.yaml:ro"]`、`restart: unless-stopped`、`depends_on: ollama`（`condition: service_started`。ollama 未起動でも frontend は動く必要があるため healthy 待ちにしない）
+  - `compose.yaml`：`name: local-llm-chat`。`ollama`：`image: ollama/ollama:<固定タグ>`（`gh release view -R ollama/ollama --json tagName` で最新の安定版を調べて固定）、`gpus: all`、`mem_limit: ${OLLAMA_MEM_LIMIT:-24g}`、`environment: OLLAMA_MAX_LOADED_MODELS=1, OLLAMA_NUM_PARALLEL=1`、`restart: unless-stopped`、volume `ollama-models:/root/.ollama`、`healthcheck: ollama list`、ポート公開なし。`frontend`：`build: ./frontend`、`env_file: .env`、`ports: ["${BIND_ADDRESS:-127.0.0.1}:${PORT:-3000}:3000"]`、`volumes: ["./data:/app/data", "./models.yaml:/app/models.yaml:ro"]`、`restart: unless-stopped`、`depends_on: ollama`（`condition: service_started`。ollama 未起動でも frontend は動く必要があるため healthy 待ちにしない）
   - `.env.example`：Global Constraints の全項目
   - `models.yaml`：
 ```yaml
@@ -333,9 +337,9 @@ it("error 状態で cancel すると idle に戻る")
 
 **Interfaces:**
 - Consumes: `ollama.deleteModel`、`getDownloadManager().isBusy()`、`getConfig().defaultModel`
-- Produces: `DELETE /api/models/:name`（name は `encodeURIComponent`。`gemma4:e4b` → `gemma4%3Ae4b`）→ 204 / 400(`default_model`) / 409(`busy`)。静的ルート `models/download` が動的ルート `models/[name]` より優先されるため衝突しない
+- Produces: `DELETE /api/models/:name`（name は `encodeURIComponent`。`gemma4:e4b` → `gemma4%3Ae4b`）→ 204 / 400(`default_model` または形式違反) / 404(未インストール) / 409(`busy`)。静的ルート `models/download` が動的ルート `models/[name]` より優先されるため衝突しない
 
-- [ ] **Step 1: 失敗するテストを書く**：「デフォルトモデルは 400」「ダウンロード中は 409」「通常は deleteModel を呼び 204」
+- [ ] **Step 1: 失敗するテストを書く**：「デフォルトモデルは 400」「ダウンロード中は 409」「未インストールは 404」「`..%2F` を含む名前は 400」「通常は deleteModel を呼び 204」
 - [ ] **Step 2: 失敗を確認** → **Step 3: 実装** → **Step 4: PASS を確認**
 - [ ] **Step 5: Commit**
 
@@ -347,7 +351,7 @@ it("error 状態で cancel すると idle に戻る")
 
 **Interfaces:**
 - Produces（保存形式：`${dataDir}/sessions/<id>/session.json` と同フォルダの画像）：
-  - `createSession(model: string, firstUserText: string): Promise<Session>`（id は `YYYYMMDD-HHmmss-<6桁ランダム>`、title は `firstUserText` の空白を詰めた先頭 20 文字、超えたら末尾 `…`）
+  - `createSession(model: string, firstUserText: string): Promise<Session>`（id は `YYYYMMDD-HHmmss-<6桁ランダム>`、title は `firstUserText` の空白を詰めた先頭 20 文字、超えたら末尾 `…`。本文が空で画像だけのときは `t("session.imageOnlyTitle")`（「画像の質問」））
   - `saveSession(s: Session): Promise<void>`（一時ファイルに書いて rename。保存後 `prune(keepId = s.id)`）
   - `getSession(id): Promise<Session | null>`、`listSessions(): Promise<SessionSummary[]>`（updatedAt 降順）、`deleteSession(id): Promise<void>`（フォルダごと）
   - `saveImage(id, file: { name; type; bytes: Uint8Array }): Promise<string>`（保存したファイル名を返す。`img-<n>.<ext>`）
@@ -365,6 +369,8 @@ it("deleteSession は画像ごとフォルダを消す")
 it("validateImage: gif は type、10MB+1 byte は size")
 it("壊れた session.json は listSessions で無視する")
 it("images の file に ../ を含むと 400")
+it("セッション ID が形式違反（例 ../etc）なら GET/DELETE とも 400")
+it("本文が空で画像だけのセッションは title が『画像の質問』")
 ```
 
 - [ ] **Step 2–4: FAIL → 実装 → PASS**
@@ -436,7 +442,8 @@ it("会話中（currentSession にメッセージあり）はプルダウンが 
 it("（！）を押すと models.yaml の説明文が出る")
 it("useDownload: 初回取得が running なら進捗ダイアログを開いた状態で始まる")   // Review Focus 2
 it("locked 中は [中止] 以外のボタンが disabled")
-it("削除確認で [削除する] → 選択中モデルならデフォルトモデルに切り替わる")
+it("削除確認で [削除する] → 選択中モデルならデフォルトモデルに切り替わり、会話中だったなら新しいチャットになる")
+it("アプリを開いた直後は新しいチャット（空）＋デフォルトモデル。過去のセッションは一覧から開く")
 it("DownloadState が error ならダイアログにエラー文を出し、閉じると locked が解除される")
 ```
 
@@ -510,7 +517,7 @@ it("interrupted のメッセージに（中断）が付く")
 - [ ] **Step 1: `start.sh`**：`cd` でリポジトリルートへ → `require_docker` → `.env` が無ければ `.env.example` からコピー → 既に `frontend` が running ならブラウザを開いて終了 → ポート 3000 使用中（`ss -ltn`）なら fail → `scripts/up.sh`（`data/` はここで `mkdir -p` する。コンテナの `node` ユーザー＝UID 1000 で書けるよう、Docker に作らせない）→ `curl localhost:3000/api/health` を 2 秒間隔・最大 2 分、待ち中は経過秒を表示 → `/mnt/c/Windows/System32/cmd.exe /c start http://localhost:3000`（`appendWindowsPath=false` のため絶対パス）
 - [ ] **Step 2: `stop.sh`**：`docker compose stop` → `docker compose down`（`-v` を付けない）。引数は受け付けない
 - [ ] **Step 3: `reset.sh`**：対象一覧と合計サイズを表示（`docker system df -v` から volume `local-llm-chat_ollama-models` のサイズ、`du -sh data/`）→ `RESET` 入力で実行：`docker compose --project-directory "$LLM_APP_ROOT" kill` → `docker compose --project-directory "$LLM_APP_ROOT" down -v --rmi local --remove-orphans` → `data/sessions/*`・`data/cache/*`・`data/tmp/*` を削除 → `docker buildx rm -f local-llm-chat`（専用ビルダーとそのビルドキャッシュを削除）→ E2E の残り（`docker compose -p local-llm-chat-e2e down -v --rmi local`）も削除 → `--with-images` のときだけ `docker image rm ollama/ollama:<タグ>`。最後に消えたものと「次は start で初回と同じように起動できます」を表示。`--dry-run` のときは一覧表示だけで終了（テストと事前確認用）
-- [ ] **Step 4: `install-windows-shortcuts.sh`**：Windows のデスクトップ（`cmd.exe /c echo %USERPROFILE%` → `wslpath`）に 3 つの `.bat` を生成。中身は `wsl.exe -d <生成時の $WSL_DISTRO_NAME の値> --cd <repo の絶対パス> bash scripts/<x>.sh` と `pause`（`%WSL_DISTRO_NAME%` は Windows 側に存在しないため、生成時に値を埋め込む）。`.bat` は CRLF・Shift_JIS 問題を避けるため英数字のみで書く（`reset` は入力が要るのでウィンドウを残す）
+- [ ] **Step 4: `install-windows-shortcuts.sh`**：Windows のデスクトップ（`cmd.exe /c echo %USERPROFILE%` → `wslpath`）に 3 つの `.bat` を生成。中身は `wsl.exe -d <生成時の $WSL_DISTRO_NAME の値> --cd <repo の絶対パス> bash scripts/<x>.sh` と `pause`（`%WSL_DISTRO_NAME%` は Windows 側に存在しないため、生成時に値を埋め込む）。`.bat` は改行を CRLF で書き（`printf '...\r\n'`）、文字化けを避けるため中身は英数字のみにする（`reset` は入力が要るのでウィンドウを残す）
 - [ ] **Step 5: テスト通過を確認**　Run: `scripts/tests/run.sh`　Expected: shellcheck エラーなし、bats 全件 PASS
 - [ ] **Step 5.5: 実機確認**　Run: `scripts/stop.sh && scripts/start.sh && scripts/start.sh && scripts/reset.sh --dry-run`　Expected: `start` で health 待ち後ブラウザが開く、2 回目の `start` は起動し直さない、`--dry-run` は何も消さない
 - [ ] **Step 6: Commit**
@@ -563,6 +570,7 @@ test("削除済みモデルのセッションは入力欄 disabled と説明文"
 // attachments.spec.ts
 test("PNG を📎・ドラッグ＆ドロップ・貼り付けで添付し、送信後も画像が表示される")
 test("GIF・10MB 超・5 枚目は拒否される")
+test("9MB の PNG 4 枚を一度に送っても受け付けられる")   // 本文サイズ上限の確認
 test("text-only:1b では📎が disabled")
 // recovery.spec.ts
 test("応答中に dropAfterChunks＋/__mock/down → バナー表示、途中応答は（中断）で残る、/__mock/up でバナーが消え送信できる")  // Review Focus 1
@@ -580,15 +588,15 @@ test("failWith でモデルの実行プロセス停止を再現 → バナー表
 **Files:**
 - Create: `.github/workflows/test.yml`
 
-- [ ] **Step 1: ワークフローを書く**：`push` と `pull_request` で、ジョブ ① `unit`：Node 22 → `npm ci` → `npm test -- --coverage`（`frontend/lib` 80% 未満で失敗）→ `npm run lint`、② `scripts`：`scripts/tests/run.sh`、③ `e2e`：`npx playwright install --with-deps chromium` → `npm run test:e2e`、失敗時は Playwright レポートを artifact に保存。スモークは CI で実行しない（GPU が無いため）
+- [ ] **Step 1: ワークフローを書く**：`push` と `pull_request` で、`actions/checkout` は `submodules: true`（bats を取得するため）、Node のジョブは `working-directory: frontend`。ジョブ ① `unit`：Node 22 → `npm ci` → `npm test -- --coverage`（`frontend/lib` 80% 未満で失敗）→ `npm run lint`、② `scripts`：`scripts/tests/run.sh`、③ `e2e`：`npx playwright install --with-deps chromium` → `npm run test:e2e`、失敗時は Playwright レポートを artifact に保存。スモークは CI で実行しない（GPU が無いため）
 - [ ] **Step 2: push して確認**　Run: `git push && gh run watch`　Expected: 3 ジョブとも成功
-- [ ] **Step 3: README と CLAUDE.md にテストコマンドを追記**（`npm test` / `npm run test:e2e` / `npm run test:smoke` / `scripts/tests/run.sh`）
+- [ ] **Step 3: CLAUDE.md のテストコマンドが実際と一致しているか確認し、違えば直す**（README は Task 14 で作る）
 - [ ] **Step 4: Commit**
 
 ### Task 14: 完成確認（spec 9 章）と README
 
 **Files:**
-- Create: `README.md`（前提、`setup.sh` → `start` の手順、`.env` 項目、`models.yaml` の書き方、スクリプト一覧）
+- Create: `README.md`（前提、`setup.sh` → `start` の手順、`.env` 項目、`models.yaml` の書き方、スクリプト一覧、テストの実行方法）
 
 - [ ] **Step 1: README を書く**
 - [ ] **Step 2: spec 9 章の 1・2 を実行**　Run: `curl -s -o /dev/null -w "%{http_code}\n" localhost:3000 && /mnt/c/Windows/System32/curl.exe -s -o NUL -w "%{http_code}" http://localhost:3000`　Expected: `200` と `200`
