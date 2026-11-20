@@ -43,9 +43,10 @@
 ├── models.yaml
 ├── scripts/
 │   ├── setup.sh              # Docker Engine + NVIDIA Container Toolkit 導入（ユーザーが sudo で実行）
-│   ├── lib.sh                # 共通関数（色付き出力、前提チェック）
+│   ├── lib.sh                # 共通関数（色付き出力、前提チェック、専用ビルダー）
+│   ├── up.sh                 # 専用ビルダーでビルドして compose up（開発・start.sh 共通）
 │   ├── start.sh / stop.sh / reset.sh
-│   └── install-windows-shortcuts.sh   # start/stop/reset.bat をデスクトップに生成
+│   └── install-windows-shortcuts.sh   # LocalLLM-start/stop/reset.bat をデスクトップに生成
 └── frontend/
     ├── Dockerfile
     ├── next.config.ts
@@ -127,9 +128,9 @@ export type ChatEvent =
 - Create: `scripts/lib.sh`, `scripts/setup.sh`
 
 **Interfaces:**
-- Produces: `scripts/lib.sh` の関数 `info <msg>` / `ok <msg>` / `fail <msg> <対処>`（`fail` は exit 1）/ `require_docker` / `require_gpu_in_docker`。Task 11 が使う
+- Produces: `scripts/lib.sh` の関数 `info <msg>` / `ok <msg>` / `fail <msg> <対処>`（`fail` は exit 1）/ `require_docker` / `require_gpu_in_docker` / `ensure_builder`（buildx ビルダー `local-llm-chat`（`--driver docker-container`）が無ければ作成し、`export BUILDX_BUILDER=local-llm-chat`）。Task 2・11 が使う
 
-- [ ] **Step 1: `scripts/lib.sh` を作る**。`fail` は「✖ 原因」「→ 対処」の 2 行を出す。`require_docker`：`docker` が無ければ `fail "Docker が見つかりません" "scripts/setup.sh を実行してください"`、デーモン停止なら `sudo systemctl start docker` を試す。`require_gpu_in_docker`：`docker run --rm --gpus all ubuntu nvidia-smi -L` が失敗したら fail
+- [ ] **Step 1: `scripts/lib.sh` を作る**。`fail` は「✖ 原因」「→ 対処」の 2 行を出す。`require_docker`：`docker` が無ければ `fail "Docker が見つかりません" "scripts/setup.sh を実行してください"`、デーモン停止なら `sudo systemctl start docker` を試す。`require_gpu_in_docker`：`docker run --rm --gpus all ubuntu nvidia-smi -L` が失敗したら fail。`ensure_builder`：専用ビルダーにする理由は、`reset.sh` が `docker buildx rm local-llm-chat` でこのアプリのビルドキャッシュだけを確実に消せるようにするため（`docker builder prune` はプロジェクト単位で絞れない）
 - [ ] **Step 2: `scripts/setup.sh` を作る**。Docker 公式手順（apt リポジトリ追加 → `docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin`）、`usermod -aG docker $USER`、`systemctl enable --now docker`、NVIDIA 公式手順（`nvidia-container-toolkit` 導入 → `nvidia-ctk runtime configure --runtime=docker` → docker 再起動）。各段階の前に導入済みかを確認してスキップ（再実行しても安全）。最後に `docker run --rm --gpus all ubuntu nvidia-smi -L` の結果を表示
 - [ ] **Step 3: 構文チェック**　Run: `bash -n scripts/lib.sh scripts/setup.sh && shellcheck scripts/*.sh`（shellcheck が無ければ `sudo apt install -y shellcheck` をユーザーに依頼）　Expected: エラーなし
 - [ ] **Step 4: ユーザーが実行する**（sudo パスワードが必要なため実装者は実行しない）。ユーザーに `sudo bash scripts/setup.sh` を依頼し、終了後 WSL を開き直してもらう
@@ -139,7 +140,7 @@ export type ChatEvent =
 ### Task 2: プロジェクトの土台（Next.js・compose・設定・i18n・テーマ）
 
 **Files:**
-- Create: `frontend/`（create-next-app）、`frontend/Dockerfile`、`frontend/next.config.ts`、`frontend/middleware.ts`、`frontend/lib/{config,i18n,theme,types}.ts`、`frontend/messages/ja.json`、`frontend/app/globals.css`、`compose.yaml`、`.env.example`、`models.yaml`
+- Create: `scripts/up.sh`、`frontend/`（create-next-app）、`frontend/Dockerfile`、`frontend/next.config.ts`、`frontend/middleware.ts`、`frontend/lib/{config,i18n,theme,types}.ts`、`frontend/messages/ja.json`、`frontend/app/globals.css`、`compose.yaml`、`.env.example`、`models.yaml`
 - Test: `frontend/lib/__tests__/config.test.ts`、`frontend/lib/__tests__/i18n.test.ts`
 
 **Interfaces:**
@@ -183,8 +184,10 @@ models:
   - { name: "gemma4:12b", sizeGb: 8.0 }
   - { name: "gemma4:26b", sizeGb: 18 }
 ```
-- [ ] **Step 7: 起動確認**　Run: `cp .env.example .env && docker compose up -d --build && sleep 20 && curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 && docker compose exec ollama nvidia-smi -L`　Expected: `200` と GPU 名
-- [ ] **Step 8: Commit**　`git add -A && git commit -m "feat: Next.js と compose の土台を追加"`
+  - `scripts/up.sh`：`source scripts/lib.sh` → `require_docker` → `ensure_builder` → `mkdir -p data` → `docker compose up -d --build`
+- [ ] **Step 7: 起動確認**　Run: `cp .env.example .env && scripts/up.sh && sleep 20 && curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 && docker compose exec ollama nvidia-smi -L`　Expected: `200` と GPU 名
+- [ ] **Step 8: CLAUDE.md を更新**：「コマンド」表を実際に動いたコマンドに合わせて直し、「フォルダ構成」を 5 行程度で追記（60 行以内に保つ）
+- [ ] **Step 9: Commit**　`git add -A && git commit -m "feat: Next.js と compose の土台を追加"`
 
 ### Task 3: Ollama クライアント・負荷区分・モデル一覧 API
 
@@ -221,7 +224,7 @@ it("デフォルトモデルが excluded サイズでも一覧に残す")       
 - [ ] **Step 2: 失敗を確認**　Run: `npm test -- tiers catalog`　Expected: FAIL
 - [ ] **Step 3: 実装**。`GET /api/models` は Ollama 停止時に例外を出さず `installed: []`・`ollamaUp: false` で 200 を返す（Review Focus 5）。capabilities は installed の各モデルに `showModel` を呼んで埋める（並列）
 - [ ] **Step 4: テスト通過を確認**　Run: `npm test`　Expected: PASS
-- [ ] **Step 5: 実機確認**　Run: `docker compose up -d --build && curl -s localhost:3000/api/models`　Expected: `gemma4:e4b` などを含む JSON、`"ollamaUp":true`
+- [ ] **Step 5: 実機確認**　Run: `scripts/up.sh && curl -s localhost:3000/api/models`　Expected: `gemma4:e4b` などを含む JSON、`"ollamaUp":true`
 - [ ] **Step 6: Commit**
 
 ### Task 4: 起動時のモデル自動検索（discovery）
@@ -253,7 +256,7 @@ it("fetch が全て失敗してもキャッシュ無しなら [] を返す")
 - [ ] **Step 2: 失敗を確認**　Run: `npm test -- discovery`　Expected: FAIL
 - [ ] **Step 3: 実装**。`parseTagNames` は `href="/library/<family>:<tag>"` を抽出し重複除去。manifest 取得は family ごとに直列、全体 30 秒で打ち切り
 - [ ] **Step 4: テスト通過を確認**　Expected: PASS
-- [ ] **Step 5: 実機確認**　Run: `docker compose up -d --build && curl -s localhost:3000/api/models | grep -o '"source":"discovered"' | head -3 && ls data/cache/discovery.json`　Expected: discovered が 1 件以上、キャッシュファイルあり
+- [ ] **Step 5: 実機確認**　Run: `scripts/up.sh && curl -s localhost:3000/api/models | grep -o '"source":"discovered"' | head -3 && ls data/cache/discovery.json`　Expected: discovered が 1 件以上、キャッシュファイルあり
 - [ ] **Step 6: Commit**
 
 ### Task 5: ダウンロード管理（進捗・中止・空き容量・起動時自動 DL）
@@ -404,7 +407,7 @@ it("DownloadState が error ならダイアログにエラー文を出し、閉�
 ```
 
 - [ ] **Step 2–4: FAIL → 実装 → PASS**。アイコンはインライン SVG（ゴミ箱、情報、クリップ、鍵）で `Icon` にまとめる。セッション行のゴミ箱は `ConfirmDialog` を通す
-- [ ] **Step 5: 実機確認**　Run: `docker compose up -d --build` の後、Playwright で `http://localhost:3000` を開いてスクリーンショット　Expected: 左にセッション一覧、上にモデル選択と（！）とゴミ箱
+- [ ] **Step 5: 実機確認**　Run: `scripts/up.sh` の後、Playwright で `http://localhost:3000` を開いてスクリーンショット　Expected: 左にセッション一覧、上にモデル選択と（！）とゴミ箱
 - [ ] **Step 6: Commit**
 
 ### Task 10: チャット画面（Markdown・Mermaid・思考・警告・画像添付・閲覧のみ・復帰バナー）
@@ -454,9 +457,9 @@ it("interrupted のメッセージに（中断）が付く")
 - Consumes: `scripts/lib.sh`（Task 1）
 - Produces: Windows デスクトップの `LocalLLM-start.bat` / `LocalLLM-stop.bat` / `LocalLLM-reset.bat`
 
-- [ ] **Step 1: `start.sh`**：`cd` でリポジトリルートへ → `require_docker` → `.env` が無ければ `.env.example` からコピー → `mkdir -p data`（コンテナの `node` ユーザー＝UID 1000 で書けるようにするため、Docker に作らせない）→ 既に `frontend` が running ならブラウザを開いて終了 → ポート 3000 使用中（`ss -ltn`）なら fail → `docker compose up -d --build` → `curl localhost:3000/api/health` を 2 秒間隔・最大 2 分、待ち中は経過秒を表示 → `/mnt/c/Windows/System32/cmd.exe /c start http://localhost:3000`（`appendWindowsPath=false` のため絶対パス）
+- [ ] **Step 1: `start.sh`**：`cd` でリポジトリルートへ → `require_docker` → `.env` が無ければ `.env.example` からコピー → 既に `frontend` が running ならブラウザを開いて終了 → ポート 3000 使用中（`ss -ltn`）なら fail → `scripts/up.sh`（`data/` はここで `mkdir -p` する。コンテナの `node` ユーザー＝UID 1000 で書けるよう、Docker に作らせない）→ `curl localhost:3000/api/health` を 2 秒間隔・最大 2 分、待ち中は経過秒を表示 → `/mnt/c/Windows/System32/cmd.exe /c start http://localhost:3000`（`appendWindowsPath=false` のため絶対パス）
 - [ ] **Step 2: `stop.sh`**：`docker compose stop` → `docker compose down`（`-v` を付けない）。引数は受け付けない
-- [ ] **Step 3: `reset.sh`**：対象一覧と合計サイズを表示（`docker system df -v` から volume `local-llm-chat_ollama-models` のサイズ、`du -sh data/`）→ `RESET` 入力で実行：`docker compose kill` → `docker compose down -v --rmi local --remove-orphans` → `data/sessions/*`・`data/cache/*`・`data/tmp/*` を削除 → `docker builder prune -f --filter "label=com.docker.compose.project=local-llm-chat"`（Dockerfile に `LABEL com.docker.compose.project=local-llm-chat` を追加しておく。効かない場合は frontend イメージ削除で十分とし、その旨を出力）→ `--with-images` のときだけ `docker image rm ollama/ollama:<タグ>`。最後に消えたものと「次は start で初回と同じように起動できます」を表示
+- [ ] **Step 3: `reset.sh`**：対象一覧と合計サイズを表示（`docker system df -v` から volume `local-llm-chat_ollama-models` のサイズ、`du -sh data/`）→ `RESET` 入力で実行：`docker compose kill` → `docker compose down -v --rmi local --remove-orphans` → `data/sessions/*`・`data/cache/*`・`data/tmp/*` を削除 → `docker buildx rm -f local-llm-chat`（専用ビルダーとそのビルドキャッシュを削除）→ `--with-images` のときだけ `docker image rm ollama/ollama:<タグ>`。最後に消えたものと「次は start で初回と同じように起動できます」を表示
 - [ ] **Step 4: `install-windows-shortcuts.sh`**：Windows のデスクトップ（`cmd.exe /c echo %USERPROFILE%` → `wslpath`）に 3 つの `.bat` を生成。中身は `wsl.exe -d %WSL_DISTRO_NAME% --cd <repo の絶対パス> bash scripts/<x>.sh` と `pause`（`reset` は入力が要るのでウィンドウを残す）
 - [ ] **Step 5: 確認**　Run: `bash -n scripts/*.sh && shellcheck scripts/*.sh && scripts/stop.sh && scripts/start.sh`　Expected: shellcheck エラーなし、`start` で health 待ち後ブラウザが開く、2 回目の `start` は起動し直さない
 - [ ] **Step 6: Commit**
@@ -470,5 +473,6 @@ it("interrupted のメッセージに（中断）が付く")
 - [ ] **Step 2: spec 9 章の 1・2 を実行**　Run: `curl -s -o /dev/null -w "%{http_code}\n" localhost:3000 && /mnt/c/Windows/System32/curl.exe -s -o NUL -w "%{http_code}" http://localhost:3000`　Expected: `200` と `200`
 - [ ] **Step 3: spec 9 章の 3 を Playwright で確認**（チャット、DL と中止、削除とデフォルトへの切替、リロード後の履歴、画像添付）。各項目のスクリーンショットを残す
 - [ ] **Step 4: 高負荷確認（9 章の 6）**：`.env` を `OLLAMA_MEM_LIMIT=6g` にして `docker compose up -d` → `gemma4:12b` でチャット → Ollama が OOM で再起動（`docker compose ps` の RESTARTS 増加）、画面にバナー → 復帰後に解除、WSL のシェルが操作可能。終わったら `24g` に戻す
-- [ ] **Step 5: ユーザーに依頼**：Windows で `LocalLLM-start.bat` / `stop.bat` / `reset.bat` をダブルクリックして 9 章の 4・5 を確認してもらう
-- [ ] **Step 6: Commit & push**　`git add -A && git commit -m "docs: README を追加" && git push`
+- [ ] **Step 5: ユーザーに依頼**：Windows で `LocalLLM-start.bat` / `LocalLLM-stop.bat` / `LocalLLM-reset.bat` をダブルクリックして 9 章の 4・5 を確認してもらう
+- [ ] **Step 6: CLAUDE.md の最終確認**：コマンド表とルールが実装と一致しているか見直す
+- [ ] **Step 7: Commit & push**　`git add -A && git commit -m "docs: README を追加" && git push`
