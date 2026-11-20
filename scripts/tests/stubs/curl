@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# テスト用の偽 curl。$STUB_CURL_FAIL=1 なら失敗する
+printf '%s\n' "$*" >>"${STUB_CALLS:-/dev/null}"
+[ "${STUB_CURL_FAIL:-0}" = 1 ] && exit 7
+exit 0

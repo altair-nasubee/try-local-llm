@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# テスト用の偽 docker。呼ばれた引数を 1 行ずつ $DOCKER_CALLS に追記し、一部の問い合わせには固定の出力を返す
+printf '%s\n' "$*" >>"${DOCKER_CALLS:-/dev/null}"
+case "$*" in
+  "compose ps --status running --services"*)
+    if [ "${STUB_FRONTEND_RUNNING:-0}" = 1 ]; then printf 'ollama\nfrontend\n'; fi ;;
+  "system df -v"*)
+    printf 'Local Volumes space usage:\n\nVOLUME NAME                   LINKS     SIZE\nlocal-llm-chat_ollama-models  1         6.6GB\nother_volume                  1         1GB\n' ;;
+  "compose config --images"*)
+    printf 'ollama/ollama:0.40.16\nlocal-llm-chat-frontend\n' ;;
+esac
+exit 0
