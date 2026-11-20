@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -222,6 +222,18 @@ describe("getCatalog", () => {
       capabilities: ["completion", "vision", "thinking"],
     });
     expect(res.models[1]).toMatchObject({ name: "gemma4:12b", installed: false });
+  });
+
+  it("検索結果のキャッシュを一覧に含める", async () => {
+    vi.stubEnv("DATA_DIR", dir);
+    mkdirSync(path.join(dir, "cache"), { recursive: true });
+    writeFileSync(
+      path.join(dir, "cache", "discovery.json"),
+      JSON.stringify({ fetchedAt: new Date().toISOString(), families: [], models: [{ name: "qwen3:8b", sizeBytes: 5.2e9 }] }),
+    );
+    vi.stubGlobal("fetch", downFetch());
+    const res = await getCatalog();
+    expect(res.models.find((m) => m.name === "qwen3:8b")).toMatchObject({ source: "discovered", tier: "comfort" });
   });
 
   it("Ollama 停止時は例外を出さず、installed なし・ollamaUp:false", async () => {

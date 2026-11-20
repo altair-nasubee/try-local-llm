@@ -1,41 +1,17 @@
 // モデル一覧の組み立て：models.yaml の候補 + インストール済み + 自動検索の結果
-import { readFileSync } from "node:fs";
-import { parse } from "yaml";
 import { type AppConfig, getConfig } from "@/lib/config";
+import { readDiscoveryCache } from "@/lib/discovery";
 import { isUp, listInstalled, showModel } from "@/lib/ollama";
 import { classifyTier } from "@/lib/tiers";
 import type { ModelEntry, ModelsResponse } from "@/lib/types";
-import { isValidFamily, isValidModelName } from "@/lib/validate";
+import { loadYaml, type YamlModels } from "@/lib/models-yaml";
 
-export type YamlModels = { families: string[]; models: { name: string; sizeGb: number | null }[] };
+export { loadYaml, type YamlModels } from "@/lib/models-yaml";
+
 export type InstalledModel = { name: string; size: number; capabilities: string[] };
 export type DiscoveredModel = { name: string; sizeBytes: number };
 
 const GB = 1e9;
-
-// models.yaml を読む。無い・壊れている・形式の合わない項目は捨てる（起動を止めない）
-export function loadYaml(path: string): YamlModels {
-  let doc: unknown;
-  try {
-    doc = parse(readFileSync(path, "utf8"));
-  } catch {
-    return { families: [], models: [] };
-  }
-  const obj = (doc ?? {}) as { families?: unknown; models?: unknown };
-  const families = Array.isArray(obj.families)
-    ? obj.families.filter((f): f is string => typeof f === "string" && isValidFamily(f))
-    : [];
-  const models: YamlModels["models"] = [];
-  if (Array.isArray(obj.models)) {
-    for (const m of obj.models) {
-      if (!m || typeof m !== "object") continue;
-      const { name, sizeGb } = m as { name?: unknown; sizeGb?: unknown };
-      if (typeof name !== "string" || !isValidModelName(name)) continue;
-      models.push({ name, sizeGb: typeof sizeGb === "number" && sizeGb > 0 ? sizeGb : null });
-    }
-  }
-  return { families, models };
-}
 
 export function buildCatalog(input: {
   yaml: YamlModels;
@@ -115,8 +91,7 @@ async function collectInstalled(): Promise<InstalledModel[] | null> {
 export async function getCatalog(): Promise<ModelsResponse> {
   const cfg = getConfig();
   const yaml = loadYaml(cfg.modelsYamlPath);
-  const installed = await collectInstalled();
-  const discovered: DiscoveredModel[] = [];
+  const [installed, discovered] = await Promise.all([collectInstalled(), readDiscoveryCache(cfg)]);
   return {
     models: buildCatalog({ yaml, installed: installed ?? [], discovered, cfg }),
     defaultModel: cfg.defaultModel,

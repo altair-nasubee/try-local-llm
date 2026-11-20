@@ -38,6 +38,32 @@ describe("GET /api/models", () => {
   });
 });
 
+describe("GET /api/models と自動検索", () => {
+  const searched = (f: ReturnType<typeof downFetch>) =>
+    f.mock.calls.some((c) => String((c as unknown[])[0]).startsWith("https://ollama.com/"));
+
+  it("DISCOVERY_ENABLED=true なら裏で検索を始める（応答は待たない）", async () => {
+    vi.stubEnv("DISCOVERY_ENABLED", "true");
+    vi.stubEnv("DATA_DIR", dir);
+    writeFileSync(path.join(dir, "models.yaml"), "families: [gemma4]\nmodels: []\n");
+    const f = downFetch();
+    vi.stubGlobal("fetch", f);
+    const res = await models();
+    expect(res.status).toBe(200);
+    await vi.waitFor(() => expect(searched(f)).toBe(true));
+  });
+
+  it("DISCOVERY_ENABLED=false なら外部に出ない", async () => {
+    vi.stubEnv("DATA_DIR", dir);
+    writeFileSync(path.join(dir, "models.yaml"), "families: [gemma4]\nmodels: []\n");
+    const f = downFetch();
+    vi.stubGlobal("fetch", f);
+    await models();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(searched(f)).toBe(false);
+  });
+});
+
 describe("GET /api/health", () => {
   it("Ollama が応答すれば ollamaUp:true", async () => {
     vi.stubGlobal("fetch", fakeFetch({ "GET /api/version": () => json({ version: "x" }) }).fetch);
