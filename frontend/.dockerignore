@@ -6,3 +6,5 @@ coverage
 test-results
 playwright-report
 .env*
+# テスト専用の設定（e2e/ を除外しているので、残すと型チェックで失敗する）
+playwright*.config.ts

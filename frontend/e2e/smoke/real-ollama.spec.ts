@@ -1,8 +1,33 @@
 // 実 Ollama（GPU）での最小限の確認。scripts/start.sh で起動してから npm run test:smoke
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { BASE_URL, SESSION_LIMIT } from "./env";
 
 const picker = (page: import("@playwright/test").Page) => page.getByRole("combobox", { name: "モデル" });
+
+// 本番の画面で実際に送信するので、利用者の会話を消さないようにする：
+// - 会話を作ると上限を超えた古い会話が自動で消えるため、上限に達していたら何も送らずに止める
+// - テストで作った会話は、テストのたびに消す
+type Summary = { id: string };
+const listSessions = async (): Promise<Summary[]> => (await fetch(`${BASE_URL}/api/sessions`)).json();
+let existing = new Set<string>();
+
+test.beforeAll(async () => {
+  const list = await listSessions();
+  if (list.length >= SESSION_LIMIT) {
+    throw new Error(
+      `保存済みの会話が上限（${SESSION_LIMIT} 件）に達しています。このまま流すと古い会話が自動で消えるため中止しました。` +
+        "画面から不要な会話を 1 件以上消してから、もう一度実行してください",
+    );
+  }
+  existing = new Set(list.map((s) => s.id));
+});
+
+test.afterEach(async () => {
+  for (const s of await listSessions()) {
+    if (!existing.has(s.id)) await fetch(`${BASE_URL}/api/sessions/${s.id}`, { method: "DELETE" });
+  }
+});
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
