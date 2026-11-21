@@ -40,7 +40,8 @@ if [ "${1:-}" = "--local" ]; then
   if ss -ltn 2>/dev/null | awk 'NR > 1 { print $4 }' | grep -Eq '[:.](3100|11500)$'; then
     fail "ポート 3100 か 11500 が使用中です" "前回の E2E のプロセスが残っていないか確認してください（ss -ltnp）"
   fi
-  PORT=11500 setsid node e2e/mock-ollama/server.mjs >"$tmp/mock.log" 2>&1 &
+  # 操作用の /__mock/* を LAN に出さないよう、127.0.0.1 だけで待ち受ける
+  PORT=11500 HOST=127.0.0.1 setsid node e2e/mock-ollama/server.mjs >"$tmp/mock.log" 2>&1 &
   pids+=("$!")
   (cd frontend && npm run build >"$tmp/build.log" 2>&1) || fail "frontend のビルドに失敗しました" "$tmp/build.log を確認してください"
   mkdir -p "$tmp/data"

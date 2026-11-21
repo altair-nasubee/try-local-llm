@@ -4,6 +4,8 @@
 import http from "node:http";
 
 const PORT = Number(process.env.PORT ?? 11434);
+// コンテナの中では 0.0.0.0（公開先は compose.e2e.yaml で 127.0.0.1 に絞る）。コンテナの外で動かすときは 127.0.0.1 を渡す
+const HOST = process.env.HOST ?? "0.0.0.0";
 
 const DEFAULT_SCRIPT = { content: "OK", chunkDelayMs: 20 };
 const DEFAULT_PULL = { totalBytes: 5e7, stepMs: 100 };
@@ -223,8 +225,8 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`mock ollama listening on :${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`mock ollama listening on ${HOST}:${PORT}`);
 });
 
 // keep-alive の接続が残っていても、すぐに終わる
