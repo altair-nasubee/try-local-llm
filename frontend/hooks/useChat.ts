@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { errorText, t } from "@/lib/i18n";
 import { readNdjson } from "@/lib/ndjson";
-import type { ChatEvent, ChatMessage, Session, SessionSummary } from "@/lib/types";
+import type { ChatEvent, ChatMessage, SessionDetail, SessionSummary } from "@/lib/types";
 
 const HEALTH_INTERVAL_MS = 3000;
 
@@ -50,9 +50,11 @@ export function useChat(
     if (sessionId === null) return;
     const gen = genRef.current;
     fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { cache: "no-store" })
-      .then((res) => (res.ok ? (res.json() as Promise<Session>) : null))
+      .then((res) => (res.ok ? (res.json() as Promise<SessionDetail>) : null))
       .then((s) => {
-        if (s && gen === genRef.current) setMessages(s.messages);
+        if (!s || gen !== genRef.current) return;
+        setMessages(s.messages);
+        setWarn(s.contextWarn);
       })
       .catch(() => {});
   }, [sessionId, previewUrls]);

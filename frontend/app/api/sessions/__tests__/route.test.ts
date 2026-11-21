@@ -47,8 +47,17 @@ describe("/api/sessions/:id", () => {
     const s = await createSession("gemma4:e4b", "質問");
     const res = await getOne(req(), ctx({ id: s.id }));
     expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toEqual(s);
+    await expect(res.json()).resolves.toEqual({ ...s, contextWarn: false });
     expect((await getOne(req(), ctx({ id: "20200101-000000-zzzzzz" }))).status).toBe(404);
+  });
+
+  it("GET は会話が長ければ contextWarn:true を付ける（開き直しても長さの警告を出すため）", async () => {
+    vi.stubEnv("NUM_CTX", "8192");
+    vi.stubEnv("CONTEXT_WARN_RATIO", "0.8");
+    const s = await createSession("gemma4:e4b", "質問");
+    await saveSession({ ...s, lastContextTokens: 7000 });
+    const res = await getOne(req(), ctx({ id: s.id }));
+    await expect(res.json()).resolves.toMatchObject({ id: s.id, contextWarn: true });
   });
 
   it("セッション ID が形式違反（例 ../etc）なら GET/DELETE とも 400", async () => {

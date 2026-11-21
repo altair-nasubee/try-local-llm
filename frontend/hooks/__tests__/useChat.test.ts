@@ -76,3 +76,14 @@ describe("useChat の停止理由", () => {
     expect(result.current.error).toMatch(/軽いモデル/);
   });
 });
+
+describe("useChat の長さの警告", () => {
+  it("過去の会話を開いたとき、長ければ警告を出す", async () => {
+    mockFetch({
+      [`GET /api/sessions/${OTHER}`]: () =>
+        jsonRes({ id: OTHER, title: "o", model: "m:1b", createdAt: "t", updatedAt: "t", messages: [], contextWarn: true }),
+    });
+    const { result } = renderHook(() => useChat(OTHER, opts));
+    await waitFor(() => expect(result.current.warn).toBe(true));
+  });
+});
