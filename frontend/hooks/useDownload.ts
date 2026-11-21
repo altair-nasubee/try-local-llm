@@ -2,7 +2,7 @@
 // ダウンロード状態のポーリング。サーバー側で動くダウンロードの状態を受け取る
 // （ブラウザを閉じても続き、開き直すと進捗ダイアログが出る）
 import { useCallback, useEffect, useRef, useState } from "react";
-import { errorText } from "@/lib/i18n";
+import { errorText, t } from "@/lib/i18n";
 import type { DownloadState } from "@/lib/types";
 
 const URL_ = "/api/models/download";
@@ -13,7 +13,7 @@ async function readError(res: Response): Promise<string> {
   try {
     const body = (await res.json()) as { message?: string; error?: string };
     // サーバーの説明（空き容量の数値など）があればそれを、無ければコードを文言にする
-    return body.message ?? errorText(body.error);
+    return body.message ?? errorText(body.error, t("download.failed"));
   } catch {
     return `HTTP ${res.status}`;
   }

@@ -60,5 +60,13 @@
   "error.too_many_images": "1 回に添付できる画像は 4 枚までです",
   "error.empty": "質問を入力してください",
   "error.not_found": "この会話は見つかりません（削除された可能性があります）",
-  "error.unknown_model": "一覧にないモデルです"
+  "error.unknown_model": "一覧にないモデルです",
+  "error.ollama_down": "Ollama が起動していません。再起動を待ってから、もう一度お試しください",
+  "error.invalid_model": "モデル名の形式が正しくありません",
+  "error.invalid_session": "会話の指定が正しくありません",
+  "error.invalid_form": "送信内容を読み取れませんでした",
+  "error.invalid_path": "指定が正しくありません",
+  "error.default_model": "デフォルトのモデルは削除できません",
+  "error.not_installed": "このモデルはダウンロードされていません",
+  "error.failed": "操作に失敗しました"
 }

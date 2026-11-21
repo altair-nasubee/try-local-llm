@@ -82,6 +82,24 @@ describe("useDownload", () => {
     expect(result.current.state).toEqual({ status: "idle" });
   });
 
+  it("start が文言なしのエラーを返したら、ダウンロード用の日本語の文言にする（チャット用の文言やコードを出さない）", async () => {
+    mockFetch({
+      "GET /api/models/download": { status: "idle" },
+      "POST /api/models/download": () => jsonRes({ error: "ollama_down" }, 503),
+    });
+    const { result } = renderHook(() => useDownload({ onDone: vi.fn() }));
+    await waitFor(() => expect(result.current.state).toEqual({ status: "idle" }));
+    let message = "";
+    await act(async () => {
+      message = await result.current.start("gemma4:26b").then(
+        () => "",
+        (e: Error) => e.message,
+      );
+    });
+    expect(message).toMatch(/Ollama/);
+    expect(message).not.toMatch(/ollama_down|応答の生成/);
+  });
+
   it("cancel は DELETE して idle にする", async () => {
     let state: DownloadState = running;
     mockFetch({
