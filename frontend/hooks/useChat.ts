@@ -109,7 +109,9 @@ export function useChat(
           case "error":
             updateLast(gen, (m) => ({ ...m, interrupted: true }));
             if (ev.code === "ollama_down" || ev.code === "too_heavy") setOllamaDown(true);
-            else setError(ev.message);
+            // 再起動のバナーは復帰すると消えるので、重すぎたときは理由と対処を残す（次の送信で消える）
+            if (ev.code === "too_heavy") setError(t("chat.tooHeavyNote"));
+            else if (ev.code !== "ollama_down") setError(ev.message);
             finish();
             break;
         }

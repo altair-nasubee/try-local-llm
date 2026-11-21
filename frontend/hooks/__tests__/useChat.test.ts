@@ -56,3 +56,23 @@ describe("useChat の画像プレビュー", () => {
     expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:sent-1");
   });
 });
+
+describe("useChat の停止理由", () => {
+  it("モデルが重すぎて止まったら、バナーが消えた後も読めるよう理由と対処を error に残す", async () => {
+    mockFetch({
+      "POST /api/chat": () =>
+        ndjson([
+          { type: "session", session: { id: SID, title: "q", model: "m:1b", updatedAt: "t" } },
+          { type: "error", code: "too_heavy", message: "モデルが重すぎて停止しました。再起動中です" },
+        ]),
+    });
+    const { result } = renderHook(() => useChat(null, opts));
+    await act(async () => {
+      await result.current.send("q", []);
+    });
+    await waitFor(() => expect(result.current.streaming).toBe(false));
+    expect(result.current.ollamaDown).toBe(true);
+    expect(result.current.error).toMatch(/重すぎ/);
+    expect(result.current.error).toMatch(/軽いモデル/);
+  });
+});
