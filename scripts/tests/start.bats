@@ -47,6 +47,24 @@ teardown() { teardown_app_root; }
   [ ! -e "$LLM_APP_ROOT/sourced" ]
 }
 
+@test "start.sh は .env の BIND_ADDRESS が IP なら、その IP で起動を待ちブラウザを開く" {
+  printf 'BIND_ADDRESS=192.168.1.10\nPORT=3000\n' >"$LLM_APP_ROOT/.env"
+  run "$SCRIPTS/start.sh"
+  assert_success
+  grep -q "http://192.168.1.10:3000/api/health" "$STUB_CALLS"
+  grep -q "cmd.exe /c start http://192.168.1.10:3000" "$STUB_CALLS"
+}
+
+@test "start.sh は BIND_ADDRESS が 0.0.0.0 や 127.0.0.1 なら localhost を使う" {
+  for addr in 0.0.0.0 127.0.0.1; do
+    : >"$STUB_CALLS"
+    printf 'BIND_ADDRESS=%s\n' "$addr" >"$LLM_APP_ROOT/.env"
+    run "$SCRIPTS/start.sh"
+    assert_success
+    grep -q "cmd.exe /c start http://localhost:3000" "$STUB_CALLS"
+  done
+}
+
 @test "start.sh は既存の .env を上書きしない" {
   echo "DEFAULT_MODEL=qwen3:8b" >"$LLM_APP_ROOT/.env"
   run "$SCRIPTS/start.sh"

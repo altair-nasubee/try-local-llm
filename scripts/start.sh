@@ -18,9 +18,16 @@ if [ ! -f .env ]; then
 fi
 
 # .env は source しない（中身をシェルとして実行しないため）
-PORT="$(grep -E '^PORT=' .env | tail -n 1 | cut -d= -f2- | tr -d '[:space:]"'"'" || true)"
+env_value() { grep -E "^$1=" .env | tail -n 1 | cut -d= -f2- | tr -d '[:space:]"'"'" || true; }
+PORT="$(env_value PORT)"
 PORT="${PORT:-3000}"
-URL="http://localhost:$PORT"
+# compose は BIND_ADDRESS:PORT だけで待ち受ける。特定の IP にしたときは、その IP で確認して開く
+BIND_ADDRESS="$(env_value BIND_ADDRESS)"
+case "${BIND_ADDRESS:-127.0.0.1}" in
+  127.0.0.1 | 0.0.0.0) HOST=localhost ;;
+  *) HOST="$BIND_ADDRESS" ;;
+esac
+URL="http://$HOST:$PORT"
 
 open_browser() {
   if [ -x "$WIN_CMD" ] && "$WIN_CMD" /c start "$URL" >/dev/null 2>&1; then
