@@ -14,8 +14,8 @@ E2E_PROJECT="${LLM_COMPOSE_PROJECT}-e2e"
 APP_URL="http://localhost:3100"
 
 wait_for_health() {
-  local i
-  for i in $(seq 1 90); do
+  local _
+  for _ in $(seq 1 90); do
     if curl -fsS -o /dev/null --max-time 2 "$APP_URL/api/health"; then
       return 0
     fi
@@ -29,6 +29,7 @@ if [ "${1:-}" = "--local" ]; then
   tmp="$(mktemp -d)"
   pids=()
   # setsid で起動したプロセスグループごと終わらせる（npx の先の next-server まで止めるため）
+  # shellcheck disable=SC2329 # trap から呼ぶ
   cleanup_local() {
     local pid
     for pid in "${pids[@]}"; do kill -- "-$pid" 2>/dev/null || true; done
@@ -43,6 +44,8 @@ if [ "${1:-}" = "--local" ]; then
   pids+=("$!")
   (cd frontend && npm run build >"$tmp/build.log" 2>&1) || fail "frontend のビルドに失敗しました" "$tmp/build.log を確認してください"
   mkdir -p "$tmp/data"
+  # 中の $E2E_TMP と $LLM_APP_ROOT は子の bash で展開する
+  # shellcheck disable=SC2016
   E2E_TMP="$tmp" setsid bash -c '
     cd frontend
     exec env OLLAMA_URL=http://localhost:11500 DATA_DIR="$E2E_TMP/data" MODELS_YAML_PATH="$LLM_APP_ROOT/e2e/models.e2e.yaml" \

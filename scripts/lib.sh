@@ -11,6 +11,7 @@ LLM_APP_ROOT="${LLM_APP_ROOT:-$(cd "$LLM_SCRIPTS_DIR/.." && pwd)}"
 export LLM_APP_ROOT LLM_SCRIPTS_DIR
 
 # compose のプロジェクト名と専用ビルダー名（reset.sh がこの名前で対象を絞る）
+# shellcheck disable=SC2034 # 読み込んだ側のスクリプトで使う
 LLM_COMPOSE_PROJECT="local-llm-chat"
 LLM_BUILDER="local-llm-chat"
 
