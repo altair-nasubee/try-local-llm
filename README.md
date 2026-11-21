@@ -87,6 +87,7 @@ models:                               # 直接並べるモデル（sizeGb はダ
 ## 保存場所
 
 - 会話と添付画像：`data/sessions/<セッションID>/`（Windows のエクスプローラーからも見られます）
+- GPU の部品のキャッシュ（初回の回答を速くするため）：Docker の volume `local-llm-chat_ollama-cuda-cache`
 - ダウンロードしたモデル：Docker の volume `local-llm-chat_ollama-models`
 
 ## 重いモデルを選んだとき

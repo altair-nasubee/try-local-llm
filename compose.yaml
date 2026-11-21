@@ -13,8 +13,12 @@ services:
       # 利用者は 1 人。複数モデルの同時読み込みや並列処理でメモリが倍増するのを防ぐ
       OLLAMA_MAX_LOADED_MODELS: "1"
       OLLAMA_NUM_PARALLEL: "1"
+      # GPU の部品は初めて使うときにその場で組み立てられ（1 回数秒）、/root/.nv に保存される。
+      # コンテナを作り直しても消えないよう volume に置き、上限（既定 256MB）も広げる
+      CUDA_CACHE_MAXSIZE: "1073741824"
     volumes:
       - ollama-models:/root/.ollama
+      - ollama-cuda-cache:/root/.nv
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "ollama", "list"]
@@ -46,3 +50,4 @@ services:
 
 volumes:
   ollama-models:
+  ollama-cuda-cache:

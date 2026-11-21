@@ -5,7 +5,7 @@ case "$*" in
   "compose ps --status running --services"*)
     if [ "${STUB_FRONTEND_RUNNING:-0}" = 1 ]; then printf 'ollama\nfrontend\n'; fi ;;
   "system df -v"*)
-    printf 'Local Volumes space usage:\n\nVOLUME NAME                   LINKS     SIZE\nlocal-llm-chat_ollama-models  1         6.6GB\nother_volume                  1         1GB\n' ;;
+    printf 'Local Volumes space usage:\n\nVOLUME NAME                   LINKS     SIZE\nlocal-llm-chat_ollama-models  1         6.6GB\nlocal-llm-chat_ollama-cuda-cache  1     72MB\nother_volume                  1         1GB\n' ;;
   "compose config --images"*)
     printf 'ollama/ollama:0.40.16\nlocal-llm-chat-frontend\n' ;;
 esac

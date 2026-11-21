@@ -22,6 +22,7 @@ done
 require_docker
 
 VOLUME="${LLM_COMPOSE_PROJECT}_ollama-models"
+CUDA_CACHE_VOLUME="${LLM_COMPOSE_PROJECT}_ollama-cuda-cache"
 E2E_PROJECT="${LLM_COMPOSE_PROJECT}-e2e"
 
 # "6.6GB" → バイト数
@@ -34,19 +35,23 @@ to_bytes() {
   }'
 }
 
-volume_size="$(docker system df -v 2>/dev/null | awk -v v="$VOLUME" '$1 == v { print $NF; exit }' || true)"
+df_v="$(docker system df -v 2>/dev/null || true)"
+size_of() { printf '%s\n' "$df_v" | awk -v v="$1" '$1 == v { print $NF; exit }'; }
+volume_size="$(size_of "$VOLUME")"
+cuda_cache_size="$(size_of "$CUDA_CACHE_VOLUME")"
 data_bytes=0
 for d in data/sessions data/cache data/tmp; do
   if [ -d "$d" ]; then
     data_bytes=$((data_bytes + $(du -sb "$d" | cut -f1)))
   fi
 done
-total_bytes=$((data_bytes + $(to_bytes "${volume_size:-0B}")))
+total_bytes=$((data_bytes + $(to_bytes "${volume_size:-0B}") + $(to_bytes "${cuda_cache_size:-0B}")))
 ollama_image="$(docker compose config --images 2>/dev/null | grep '^ollama/ollama' | head -n 1 || true)"
 
 echo "次のものを消します："
 echo "  - コンテナ：ollama / frontend（止まらないものは強制停止）"
 echo "  - ダウンロード済みモデル：volume $VOLUME（${volume_size:-なし}）"
+echo "  - GPU の部品のキャッシュ：volume $CUDA_CACHE_VOLUME（${cuda_cache_size:-なし}）"
 echo "  - ネットワーク・frontend のイメージ・専用ビルダー $LLM_BUILDER（ビルドキャッシュごと）"
 echo "  - 会話の履歴と添付画像・モデル検索の保存結果：data/sessions・data/cache・data/tmp（$(numfmt --to=si --suffix=B "$data_bytes")）"
 echo "  - E2E テストの残り（プロジェクト $E2E_PROJECT）"

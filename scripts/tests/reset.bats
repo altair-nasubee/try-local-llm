@@ -23,6 +23,7 @@ teardown() { teardown_app_root; }
   assert_success
   assert_output --partial "local-llm-chat_ollama-models"
   assert_output --partial "6.6GB"
+  assert_output --partial "local-llm-chat_ollama-cuda-cache（72MB）"
   ! grep -qE "compose .*(down|kill)|buildx rm|image rm|volume rm" "$DOCKER_CALLS"
   [ -f "$LLM_APP_ROOT/data/sessions/x/session.json" ]
 }
