@@ -24,7 +24,11 @@ teardown() { teardown_app_root; }
 }
 
 @test "require_docker は docker が無ければ setup.sh を案内して失敗" {
-  run env PATH="/usr/bin:/bin" bash -c "source '$SCRIPTS/lib.sh'; require_docker"
+  # docker の入った環境（CI・セットアップ後の PC）でも「無い」状態にするため、必要なコマンドだけを置いた PATH で動かす
+  local bin="$LLM_APP_ROOT/bin"
+  mkdir -p "$bin"
+  ln -s "$(command -v dirname)" "$bin/dirname"
+  run env PATH="$bin" "$(command -v bash)" -c "source '$SCRIPTS/lib.sh'; require_docker"
   assert_failure
   assert_output --partial "Docker が見つかりません"
   assert_output --partial "setup.sh"
