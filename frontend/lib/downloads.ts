@@ -36,8 +36,9 @@ export function createDownloadManager(deps: Deps): DownloadManager {
 
   const isBusy = () => checking || current.status === "running";
 
-  async function run(model: string, ctrl: AbortController) {
-    // レイヤーごとの進捗を合計する
+  async function run(model: string, ctrl: AbortController, expectedBytes: number | null) {
+    // レイヤーごとの進捗を合計する。Ollama はレイヤーを 1 つずつ知らせるため、まだ見えていないレイヤーがある間は
+    // 合計が小さく出て進捗が戻って見える。分かっている大きさ（models.yaml・検索結果）を下限にする
     const layers = new Map<string, { completed: number; total: number }>();
     let succeeded = false;
     const stillMine = () => controller === ctrl && !ctrl.signal.aborted;
@@ -56,6 +57,7 @@ export function createDownloadManager(deps: Deps): DownloadManager {
             completed += l.completed;
             total += l.total;
           }
+          total = Math.max(total, expectedBytes ?? 0);
           current = { ...(current as Extract<DownloadState, { status: "running" }>), completed, total };
         }
         if (ev.status === "success") succeeded = true;
@@ -96,7 +98,7 @@ export function createDownloadManager(deps: Deps): DownloadManager {
           total: expectedBytes ?? 0,
           startedAt: new Date().toISOString(),
         };
-        void run(model, ctrl);
+        void run(model, ctrl, expectedBytes);
         return { ok: true };
       } finally {
         checking = false;

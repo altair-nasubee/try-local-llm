@@ -60,6 +60,18 @@ describe("DownloadManager", () => {
     expect(m.isBusy()).toBe(false);
   });
 
+  it("Ollama がファイルを 1 つずつ知らせても、合計は分かっている大きさより小さくしない（進捗が戻らない）", async () => {
+    const { m, push } = manager();
+    await m.start("gemma4:26b", 18e9);
+    // 実機では最初に 1.19GB の小さいファイルだけが届き、17GB の本体は後から現れる
+    push({ status: "pulling aaa", digest: "sha256:aaa", total: 1.19e9, completed: 0.9e9 });
+    await flush();
+    expect(m.state()).toMatchObject({ status: "running", completed: 0.9e9, total: 18e9 });
+    push({ status: "pulling bbb", digest: "sha256:bbb", total: 17.08e9, completed: 0 });
+    await flush();
+    expect(m.state()).toMatchObject({ status: "running", completed: 0.9e9, total: 18.27e9 });
+  });
+
   it("実行中に start すると busy を返す", async () => {
     const { m } = manager();
     await m.start("a:1b", 1e9);
