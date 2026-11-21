@@ -43,6 +43,7 @@
   "chat.attachSize": "画像は 1 枚 10MB までです（{name}）",
   "chat.attachCount": "1 回に添付できる画像は 4 枚までです",
   "chat.attachRemoved": "このモデルは画像に対応していないため、添付を外しました",
+  "chat.imageLink": "🖼 画像を開く：{name}",
   "chat.empty": "質問を入力して送信してください",
   "chat.needDownload": "{name} はまだダウンロードされていません。ダウンロードすると使えます",
   "session.list": "セッション",

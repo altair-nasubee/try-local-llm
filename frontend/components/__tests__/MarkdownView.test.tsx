@@ -44,6 +44,16 @@ describe("MarkdownView", () => {
     expect(container.querySelector("img")).toBeNull();
   });
 
+  it("Markdown の画像は読み込まず、別タブで開くリンクとして出す（会話の内容が外部に送られないように）", () => {
+    const { container } = render(
+      <MarkdownView text={"![猫の写真](https://tracker.example/p.png?q=secret)"} streaming={false} />,
+    );
+    expect(container.querySelector("img")).toBeNull();
+    const link = screen.getByRole("link", { name: /猫の写真/ });
+    expect(link).toHaveAttribute("href", "https://tracker.example/p.png?q=secret");
+    expect(link).toHaveAttribute("target", "_blank");
+  });
+
   it("コードブロックは言語ごとに色分けし、コピーボタンを付ける", () => {
     const { container } = render(<MarkdownView text={"```js\nconst a = 1;\n```\n"} streaming={false} />);
     expect(container.querySelector("code.hljs, code .hljs-keyword")).not.toBeNull();
