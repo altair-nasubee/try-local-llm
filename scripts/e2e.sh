@@ -29,7 +29,7 @@ if [ "${1:-}" = "--local" ]; then
   tmp="$(mktemp -d)"
   pids=()
   # setsid で起動したプロセスグループごと終わらせる（npx の先の next-server まで止めるため）
-  # shellcheck disable=SC2329 # trap から呼ぶ
+  # shellcheck disable=SC2317,SC2329 # trap から呼ぶ（版によって番号が違う）
   cleanup_local() {
     local pid
     for pid in "${pids[@]}"; do kill -- "-$pid" 2>/dev/null || true; done
