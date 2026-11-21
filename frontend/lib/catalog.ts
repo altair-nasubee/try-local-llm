@@ -29,7 +29,8 @@ export function buildCatalog(input: {
   for (const y of yaml.models) {
     byName.set(y.name, {
       name: y.name,
-      sizeBytes: y.sizeGb === null ? null : Math.round(y.sizeGb * GB),
+      // sizeGb を書いていなければ、検索で分かったサイズを使う
+      sizeBytes: y.sizeGb === null ? (byName.get(y.name)?.sizeBytes ?? null) : Math.round(y.sizeGb * GB),
       installed: false,
       capabilities: [],
       source: "yaml",
@@ -53,8 +54,10 @@ export function buildCatalog(input: {
   for (const e of byName.values()) {
     const tier = classifyTier(e.sizeBytes, cfg);
     if (tier === "excluded") {
-      // デフォルトモデルは削除不可・起動時 DL 対象のため、重くても slow として残す
-      if (e.name === cfg.defaultModel) entries.push({ ...e, tier: "slow" });
+      // 重くても slow として残すもの：
+      // - ダウンロード済み（ターミナルで入れたものを含む）：会話を続けられ、画面から削除できるように
+      // - デフォルトモデル：削除不可で、起動時のダウンロード対象のため
+      if (e.installed || e.name === cfg.defaultModel) entries.push({ ...e, tier: "slow" });
       continue;
     }
     entries.push({ ...e, tier });

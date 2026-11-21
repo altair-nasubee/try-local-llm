@@ -87,14 +87,29 @@ describe("buildCatalog", () => {
     expect(m[0]).toMatchObject({ source: "yaml", sizeBytes: 8e9 });
   });
 
-  it("インストール済みでも excluded サイズなら出さない", () => {
+  it("インストール済みなら excluded サイズでも tier:\"slow\" で出す（ターミナルで入れたモデルも使え、削除できる）", () => {
     const list = buildCatalog({
       yaml,
       installed: [{ name: "big:70b", size: 40e9, capabilities: [] }],
       discovered: [],
       cfg,
     });
+    expect(list.find((e) => e.name === "big:70b")).toMatchObject({ installed: true, tier: "slow" });
+  });
+
+  it("未インストールの excluded サイズは出さない", () => {
+    const list = buildCatalog({ yaml, installed: [], discovered: [{ name: "big:70b", sizeBytes: 40e9 }], cfg });
     expect(names(list)).not.toContain("big:70b");
+  });
+
+  it("yaml に sizeGb が無く検索で見つかったモデルは、検索のサイズを使う", () => {
+    const list = buildCatalog({
+      yaml: { families: [], models: [{ name: "qwen3:8b", sizeGb: null }] },
+      installed: [],
+      discovered: [{ name: "qwen3:8b", sizeBytes: 5.2e9 }],
+      cfg,
+    });
+    expect(list.find((e) => e.name === "qwen3:8b")).toMatchObject({ source: "yaml", sizeBytes: 5.2e9, tier: "comfort" });
   });
 
   it("並び順：installed が先、次に sizeBytes 昇順", () => {
