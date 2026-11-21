@@ -48,4 +48,11 @@ describe("getConfig", () => {
   it("空の DEFAULT_MODEL は既定値に戻す", () => {
     expect(getConfig({ DEFAULT_MODEL: "" }).defaultModel).toBe("gemma4:e4b");
   });
+
+  it("タグを省いた DEFAULT_MODEL には :latest を補う（Ollama は gemma4 を gemma4:latest として一覧に出すため）", () => {
+    expect(getConfig({ DEFAULT_MODEL: "gemma4" }).defaultModel).toBe("gemma4:latest");
+    expect(getConfig({ DEFAULT_MODEL: "hf.co/User/Repo" }).defaultModel).toBe("hf.co/User/Repo:latest");
+    expect(getConfig({ DEFAULT_MODEL: "hf.co/User/Repo:Q4_K_M" }).defaultModel).toBe("hf.co/User/Repo:Q4_K_M");
+    expect(getConfig({ DEFAULT_MODEL: " qwen3:8b " }).defaultModel).toBe("qwen3:8b");
+  });
 });
