@@ -22,7 +22,7 @@ setup_app_root() {
   export PATH="$BATS_TEST_DIRNAME/stubs:$PATH"
   export WIN_CMD="$BATS_TEST_DIRNAME/stubs/cmd.exe"
   export WIN_POWERSHELL="$BATS_TEST_DIRNAME/stubs/powershell.exe"
-  unset STUB_FRONTEND_RUNNING STUB_PORT_BUSY STUB_CURL_FAIL
+  unset STUB_FRONTEND_RUNNING STUB_PORT_BUSY STUB_CURL_FAIL STUB_CURL_FAIL_TIMES
 }
 
 teardown_app_root() {

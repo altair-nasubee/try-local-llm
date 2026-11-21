@@ -14,6 +14,14 @@ teardown() { teardown_app_root; }
   [ -f "$LLM_APP_ROOT/.env" ]
 }
 
+@test "start.sh は起動を待つ間の curl のエラーを画面に出さない" {
+  export STUB_CURL_FAIL_TIMES=1
+  run "$SCRIPTS/start.sh"
+  assert_success
+  assert_line --partial "✔ 起動しました"
+  refute_output --partial "curl:"
+}
+
 @test "start.sh は frontend 起動済みなら up.sh を呼ばずブラウザだけ開く" {
   export STUB_FRONTEND_RUNNING=1
   run "$SCRIPTS/start.sh"

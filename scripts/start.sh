@@ -48,7 +48,8 @@ require_gpu_in_docker
 info "画面の起動を待っています（最大 ${WAIT_SEC} 秒）"
 elapsed=0
 while [ "$elapsed" -le "$WAIT_SEC" ]; do
-  if curl -fsS -o /dev/null --max-time 2 "$URL/api/health"; then
+  # 起動途中は接続エラーになるのが普通なので、curl のエラーは出さない
+  if curl -fs -o /dev/null --max-time 2 "$URL/api/health" 2>/dev/null; then
     [ "$elapsed" -gt 0 ] && printf '\n'
     ok "起動しました（${elapsed} 秒）"
     open_browser
