@@ -17,9 +17,13 @@ const TOTAL_TIMEOUT_MS = 30_000;
 const RETRY_AFTER_FAILURE_MS = 3600e3;
 const MANIFEST_ACCEPT = "application/vnd.docker.distribution.manifest.v2+json";
 
-// メモリ上の状態：直前の失敗時刻（1 時間は再検索しない）と、実行中の検索（同時実行は 1 つ）
-let lastFailureAt: number | null = null;
-let running: Promise<void> | null = null;
+// メモリ上の状態：直前の失敗時刻（1 時間は再検索しない）と、実行中の検索（同時実行は 1 つ）。
+// instrumentation と Route Handler ではモジュールが別々に読み込まれるため、globalThis に置いて共有する
+type DiscoveryState = { lastFailureAt: number | null; running: Promise<void> | null };
+declare global {
+  var __discoveryState: DiscoveryState | undefined;
+}
+const state = (): DiscoveryState => (globalThis.__discoveryState ??= { lastFailureAt: null, running: null });
 
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -115,7 +119,8 @@ async function search(cfg: AppConfig, fetchFn: FetchFn): Promise<void> {
   const families = loadYaml(cfg.modelsYamlPath).families;
   const cache = await readCache(cfg);
   if (!needsSearch(cache, families, cfg)) return;
-  if (lastFailureAt !== null && Date.now() - lastFailureAt < RETRY_AFTER_FAILURE_MS) return;
+  const st = state();
+  if (st.lastFailureAt !== null && Date.now() - st.lastFailureAt < RETRY_AFTER_FAILURE_MS) return;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error("discovery timeout")), TOTAL_TIMEOUT_MS);
@@ -133,16 +138,20 @@ async function search(cfg: AppConfig, fetchFn: FetchFn): Promise<void> {
       }
     }
     if (families.length > 0 && succeeded === 0) {
-      lastFailureAt = Date.now();
+      st.lastFailureAt = Date.now();
       return;
     }
-    lastFailureAt = null;
-    const next: DiscoveryCache = { fetchedAt: new Date().toISOString(), families, models };
+    // 取れなかった種類（打ち切り・404 など）があれば、取れた分は保存するが取得時刻は進めず、1 時間後に検索し直す
+    const complete = succeeded === families.length;
+    st.lastFailureAt = complete ? null : Date.now();
+    const fetchedAt = complete ? new Date().toISOString() : (cache?.fetchedAt ?? new Date(0).toISOString());
+    const next: DiscoveryCache = { fetchedAt, families, models };
     const file = cachePath(cfg);
     await mkdir(path.dirname(file), { recursive: true });
-    // 書きかけのファイルを読まれないよう、一時ファイルに書いてから置き換える
-    await writeFile(`${file}.tmp`, JSON.stringify(next, null, 2));
-    await rename(`${file}.tmp`, file);
+    // 書きかけのファイルを読まれないよう、一時ファイルに書いてから置き換える（名前は書き手ごとに変える）
+    const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+    await writeFile(tmp, JSON.stringify(next, null, 2));
+    await rename(tmp, file);
   } finally {
     clearTimeout(timer);
   }
@@ -150,14 +159,15 @@ async function search(cfg: AppConfig, fetchFn: FetchFn): Promise<void> {
 
 // 必要なときだけ検索してキャッシュを更新する。例外は外に出さない
 export function refreshDiscovery(cfg: AppConfig, fetchFn: FetchFn = fetch): Promise<void> {
-  if (!running) {
-    running = search(cfg, fetchFn)
+  const st = state();
+  if (!st.running) {
+    st.running = search(cfg, fetchFn)
       .catch(() => {
-        lastFailureAt = Date.now();
+        st.lastFailureAt = Date.now();
       })
       .finally(() => {
-        running = null;
+        st.running = null;
       });
   }
-  return running;
+  return st.running;
 }

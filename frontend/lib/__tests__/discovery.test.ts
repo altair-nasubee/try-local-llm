@@ -95,6 +95,7 @@ describe("refreshDiscovery / readDiscoveryCache", () => {
     });
 
   beforeEach(() => {
+    globalThis.__discoveryState = undefined;
     dir = mkdtempSync(path.join(tmpdir(), "discovery-"));
     writeYaml(["gemma4"]);
     cfg = getConfig({ DATA_DIR: path.join(dir, "data"), MODELS_YAML_PATH: path.join(dir, "models.yaml") });
@@ -196,6 +197,42 @@ describe("refreshDiscovery / readDiscoveryCache", () => {
     await Promise.all([refreshDiscovery(cfg, fetchFn), refreshDiscovery(cfg, fetchFn)]);
     const pageCalls = fetchFn.mock.calls.filter((c) => String(c[0]).startsWith("https://ollama.com/"));
     expect(pageCalls).toHaveLength(1);
+  });
+
+  it("2 か所で別々に読み込まれたモジュール（instrumentation と Route Handler）から同時に呼んでも、検索は 1 回", async () => {
+    const a = await load();
+    const b = await load();
+    const fetchFn = onlineFetch();
+    await Promise.all([a.refreshDiscovery(cfg, fetchFn), b.refreshDiscovery(cfg, fetchFn)]);
+    const pageCalls = fetchFn.mock.calls.filter((c) => String(c[0]).startsWith("https://ollama.com/"));
+    expect(pageCalls).toHaveLength(1);
+  });
+
+  it("失敗した記録も、別々に読み込まれたモジュールで共有する（1 時間は再検索しない）", async () => {
+    const a = await load();
+    const b = await load();
+    await a.refreshDiscovery(cfg, offlineFetch());
+    const online = onlineFetch();
+    await b.refreshDiscovery(cfg, online);
+    expect(online).not.toHaveBeenCalled();
+  });
+
+  it("取れなかった種類があれば、取れた分は保存するが取得時刻は進めず、1 時間後に検索し直す", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-21T00:00:00Z"));
+    const { refreshDiscovery, readDiscoveryCache } = await load();
+    writeYaml(["gemma4", "qwen3"]);
+    await refreshDiscovery(cfg, onlineFetch()); // qwen3 のページは 404
+    await expect(readDiscoveryCache(cfg)).resolves.toContainEqual({ name: "gemma4:e4b", sizeBytes: 6.6e9 });
+    expect(Date.parse(JSON.parse(readFileSync(cacheFile(), "utf8")).fetchedAt)).toBeLessThan(
+      Date.parse("2026-11-21T00:00:00Z"),
+    );
+    const again = onlineFetch();
+    await refreshDiscovery(cfg, again);
+    expect(again).not.toHaveBeenCalled(); // 直後は検索しない
+    vi.setSystemTime(new Date("2026-11-21T01:00:01Z"));
+    await refreshDiscovery(cfg, again);
+    expect(again).toHaveBeenCalled();
   });
 
   it("一部の種類だけ失敗したら、その種類は古いキャッシュの結果を残す", async () => {
