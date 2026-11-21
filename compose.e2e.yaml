@@ -14,8 +14,11 @@ services:
     # テストから /__mock/* を呼ぶための操作用ポート（E2E のみ）
     ports:
       - "127.0.0.1:11500:11434"
+    # テストが途中で強制終了されても、WSL の再起動時に勝手に起動してポートを占有しないようにする
+    restart: "no"
 
   frontend:
+    restart: "no"
     ports: !override
       - "127.0.0.1:3100:3000"
     volumes: !override

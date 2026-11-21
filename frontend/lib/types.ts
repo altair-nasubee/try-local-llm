@@ -40,6 +40,9 @@ export type Session = {
 
 export type SessionSummary = Pick<Session, "id" | "title" | "model" | "updatedAt">;
 
+// GET /api/sessions/:id の応答。開き直したときも長さの警告を出せるよう、判定結果を付ける
+export type SessionDetail = Session & { contextWarn: boolean };
+
 export type ChatEvent =
   | { type: "session"; session: SessionSummary }
   | { type: "thinking"; text: string }

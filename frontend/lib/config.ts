@@ -22,6 +22,12 @@ function str(value: string | undefined, fallback: string): string {
   return value && value.trim() !== "" ? value.trim() : fallback;
 }
 
+// Ollama はタグを省いたモデルを「<名前>:latest」として一覧に出す。同じ名前で比べられるよう補う
+function withTag(model: string): string {
+  const last = model.slice(model.lastIndexOf("/") + 1);
+  return last.includes(":") ? model : `${model}:latest`;
+}
+
 // 正の数でなければ既定値に戻す
 function num(value: string | undefined, fallback: number): number {
   if (value === undefined || value.trim() === "") return fallback;
@@ -37,7 +43,7 @@ function bool(value: string | undefined, fallback: boolean): boolean {
 export function getConfig(env: Env = process.env): AppConfig {
   return {
     ollamaUrl: str(env.OLLAMA_URL, "http://ollama:11434"),
-    defaultModel: str(env.DEFAULT_MODEL, "gemma4:e4b"),
+    defaultModel: withTag(str(env.DEFAULT_MODEL, "gemma4:e4b")),
     numCtx: num(env.NUM_CTX, 8192),
     idleTimeoutSec: num(env.IDLE_TIMEOUT_SEC, 180),
     contextWarnRatio: num(env.CONTEXT_WARN_RATIO, 0.8),

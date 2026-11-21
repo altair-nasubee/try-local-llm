@@ -5,6 +5,7 @@ import { createContext, useContext } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
+import { t } from "@/lib/i18n";
 import { hasOpenFence } from "@/lib/markdown";
 import { CodeBlock } from "./CodeBlock";
 import { MermaidBlock } from "./MermaidBlock";
@@ -47,7 +48,14 @@ function Link({ href, children }: { href?: string; children?: React.ReactNode })
   );
 }
 
-const components: Components = { pre: Pre, a: Link };
+// 画像は読み込まない。AI の回答に外部の画像があると、表示しただけで URL（会話の内容を含みうる）が外部に送られるため。
+// 見たいときに押して開けるよう、リンクにする
+function Image({ src, alt }: { src?: string | Blob; alt?: string }) {
+  const href = typeof src === "string" ? src : undefined;
+  return <Link href={href}>{t("chat.imageLink", { name: alt || href || "" })}</Link>;
+}
+
+const components: Components = { pre: Pre, a: Link, img: Image };
 const remarkPlugins = [remarkGfm];
 const rehypePlugins = [rehypeHighlight];
 
