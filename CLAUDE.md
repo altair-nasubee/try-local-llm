@@ -31,7 +31,7 @@ Ollama（GPU）＋ Next.js のローカル LLM チャットアプリ。Docker Co
 | 起動（ビルド込み・ブラウザなし） | `scripts/up.sh` |
 | 起動（ブラウザも開く）／終了 | `scripts/start.sh` ／ `scripts/stop.sh` |
 | 単体テスト | `cd frontend && npm test` |
-| E2E（偽 Ollama・GPU 不要） | `cd frontend && npm run test:e2e` |
+| E2E（偽 Ollama・GPU 不要） | `cd frontend && npm run test:e2e`（Docker なし：`npm run test:e2e -- --local`） |
 | スモーク（実 Ollama・GPU） | `cd frontend && npm run test:smoke` |
 | スクリプトのテスト | `scripts/tests/run.sh` |
 | ログ | `docker compose logs -f frontend` / `docker compose logs -f ollama` |
@@ -39,6 +39,12 @@ Ollama（GPU）＋ Next.js のローカル LLM チャットアプリ。Docker Co
 
 - `docker compose up --build` を直接使わず `scripts/up.sh` を使う（専用の buildx ビルダー `local-llm-chat` でビルドし、`reset.sh` でキャッシュごと消せるようにするため）
 - `sudo` が必要な操作（`scripts/setup.sh` など）は実行せず、ユーザーに依頼する
+
+## フォルダ構成
+
+- `frontend/`：Next.js（`app/api/` が Route Handler、`lib/` がサーバー処理と共有型、`components/`・`hooks/` が画面）
+- `frontend/e2e/`：Playwright（`smoke/` は実 Ollama 用）。`e2e/mock-ollama/` は偽 Ollama、`compose.e2e.yaml` は E2E 用の上書き
+- `scripts/`：起動・終了・リセット・E2E のスクリプト（`tests/` に bats）。`models.yaml` はモデル候補、`data/` は会話の保存先
 
 ## Git
 

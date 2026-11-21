@@ -4,7 +4,8 @@
 !.env.example
 
 # セッション履歴・添付画像などの実行時データ
-data/
+data/*
+!data/.gitkeep
 
 # Node.js / Next.js
 node_modules/
@@ -20,3 +21,6 @@ playwright-report/
 # OS / エディタ
 .DS_Store
 Thumbs.db
+
+# Playwright MCP の作業ファイル
+.playwright-mcp/

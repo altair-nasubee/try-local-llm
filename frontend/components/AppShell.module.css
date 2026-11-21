@@ -1,0 +1,32 @@
+.shell {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  height: 100vh;
+  height: 100dvh;
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.header {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.chat {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+@media (max-width: 720px) {
+  .shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+}

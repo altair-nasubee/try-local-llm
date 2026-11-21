@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# テスト用の偽 curl。$STUB_CURL_FAIL=1 なら失敗する。
+# $STUB_CURL_FAIL_TIMES=N なら最初の N 回だけ、本物と同じようにエラーを stderr に出して失敗する
+printf '%s\n' "$*" >>"${STUB_CALLS:-/dev/null}"
+[ "${STUB_CURL_FAIL:-0}" = 1 ] && exit 7
+if [ -n "${STUB_CURL_FAIL_TIMES:-}" ]; then
+  count_file="${STUB_CALLS:-/tmp}.curl_count"
+  n=$(($(cat "$count_file" 2>/dev/null || echo 0) + 1))
+  echo "$n" >"$count_file"
+  if [ "$n" -le "$STUB_CURL_FAIL_TIMES" ]; then
+    echo "curl: (56) Recv failure: Connection reset by peer" >&2
+    exit 56
+  fi
+fi
+exit 0

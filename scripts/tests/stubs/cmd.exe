@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# テスト用の偽 cmd.exe（ブラウザを開いた記録だけ残す）
+printf 'cmd.exe %s\n' "$*" >>"${STUB_CALLS:-/dev/null}"
+exit 0

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# テスト用の偽 pkill（実機のプロセスを終わらせない）。見つからなかった扱いで 1 を返す
+printf 'pkill %s\n' "$*" >>"${STUB_CALLS:-/dev/null}"
+exit 1

@@ -1,0 +1,6 @@
+# E2E 用のモデル候補。ダウンロードの確認は小さい tiny-dl:1b で行う（空き容量の少ない CI でも 507 にならないため）
+families: []
+models:
+  - { name: "gemma4:e4b", sizeGb: 6.6 }
+  - { name: "tiny-dl:1b", sizeGb: 0.05 }
+  - { name: "slow-dl:8b", sizeGb: 8 }

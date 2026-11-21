@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# テスト用の偽 ss。$STUB_PORT_BUSY=1 なら 127.0.0.1:3000 の LISTEN 行を返す
+echo "State  Recv-Q Send-Q Local Address:Port Peer Address:Port"
+if [ "${STUB_PORT_BUSY:-0}" = 1 ]; then echo "LISTEN 0      511        127.0.0.1:3000      0.0.0.0:*"; fi
+exit 0
