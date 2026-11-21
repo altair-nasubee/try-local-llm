@@ -25,6 +25,8 @@ export function useChat(
   const createdIdRef = useRef<string | null>(null); // 自分の送信で作られたセッション ID（これでは読み直さない）
   const abortRef = useRef<AbortController | null>(null);
   const genRef = useRef(0); // 表示中のセッションが変わったら古いストリームの結果を捨てる
+  // 送信時に作った画像プレビューの URL。会話を切り替えたとき・画面を閉じたときに解放する
+  const [previewUrls] = useState(() => new Set<string>());
 
   useEffect(() => {
     optsRef.current = opts;
@@ -39,6 +41,8 @@ export function useChat(
     abortRef.current = null;
     createdIdRef.current = null;
     // 表示中のセッションの切り替え
+    previewUrls.forEach((u) => URL.revokeObjectURL(u));
+    previewUrls.clear();
     setMessages([]);
     setStreaming(false);
     setWarn(false);
@@ -51,7 +55,9 @@ export function useChat(
         if (s && gen === genRef.current) setMessages(s.messages);
       })
       .catch(() => {});
-  }, [sessionId]);
+  }, [sessionId, previewUrls]);
+
+  useEffect(() => () => previewUrls.forEach((u) => URL.revokeObjectURL(u)), [previewUrls]);
 
   // 再起動中は /api/health を確認し、復帰したら入力を再開できるようにする
   useEffect(() => {
@@ -124,7 +130,10 @@ export function useChat(
       const gen = genRef.current;
       const now = new Date().toISOString();
       const user: UiMessage = { role: "user", content, createdAt: now };
-      if (files.length > 0) user.previews = files.map((f) => ({ name: f.name, url: URL.createObjectURL(f) }));
+      if (files.length > 0) {
+        user.previews = files.map((f) => ({ name: f.name, url: URL.createObjectURL(f) }));
+        user.previews.forEach((p) => previewUrls.add(p.url));
+      }
       const assistant: UiMessage = { role: "assistant", content: "", createdAt: now };
       setMessages((ms) => [...ms, user, assistant]);
       setStreaming(true);
@@ -169,7 +178,7 @@ export function useChat(
       void consume(res, gen);
       return true;
     },
-    [consume],
+    [consume, previewUrls],
   );
 
   const stop = useCallback(() => {

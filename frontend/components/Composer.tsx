@@ -30,6 +30,15 @@ export function Composer(props: {
   // 画面を離れるときにプレビューの URL を解放する
   useEffect(() => () => attachmentsRef.current.forEach((a) => URL.revokeObjectURL(a.url)), []);
 
+  // 画像に対応していないモデルに切り替わったら、添付を外して理由を出す（そのまま送ると 400 になるため）
+  useEffect(() => {
+    if (props.canAttach || attachmentsRef.current.length === 0) return;
+    attachmentsRef.current.forEach((a) => URL.revokeObjectURL(a.url));
+    attachmentsRef.current = [];
+    setAttachments([]);
+    setError(t("chat.attachRemoved"));
+  }, [props.canAttach]);
+
   const attachEnabled = props.canAttach && !props.disabled;
 
   function addFiles(files: File[]) {
@@ -69,7 +78,8 @@ export function Composer(props: {
     try {
       const ok = await props.onSend(text, attachments.map((a) => a.file));
       if (ok) {
-        // プレビューは送信後の発言の表示に使うので、ここでは解放しない
+        // 送信後の発言の表示には useChat が別の URL を作るので、入力欄のプレビューは解放する
+        attachments.forEach((a) => URL.revokeObjectURL(a.url));
         setText("");
         setAttachments([]);
         setError(null);

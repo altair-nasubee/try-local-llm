@@ -93,6 +93,25 @@ describe("Composer", () => {
     expect(screen.queryByRole("img", { name: "photo2.png" })).toBeNull();
   });
 
+  it("送信できたら、入力欄のプレビューの URL を解放する（送信後の表示には別の URL を使う）", async () => {
+    vi.mocked(URL.createObjectURL).mockReturnValueOnce("blob:tray-1");
+    setup();
+    await userEvent.upload(fileInput(), png("a.png"));
+    vi.mocked(URL.revokeObjectURL).mockClear();
+    await userEvent.click(screen.getByRole("button", { name: "送信" }));
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:tray-1");
+  });
+
+  it("画像に対応していないモデルに切り替えたら、添付を外して理由を表示する", async () => {
+    const props = { disabled: false, canAttach: true, streaming: false, onSend: vi.fn(async () => true), onStop: vi.fn() };
+    const { rerender } = render(<Composer {...props} />);
+    await userEvent.upload(fileInput(), png("a.png"));
+    rerender(<Composer {...props} canAttach={false} />);
+    expect(screen.queryByRole("img", { name: "a.png" })).toBeNull();
+    expect(screen.getByRole("alert")).toHaveTextContent("画像に対応していない");
+    expect(screen.getByRole("button", { name: "送信" })).toBeDisabled();
+  });
+
   it("PNG/JPEG/WebP 以外・10MB 超・5 枚目は追加されずエラー文言を表示", async () => {
     setup();
     const gif = new File([new Uint8Array([0x47, 0x49, 0x46])], "a.gif", { type: "image/gif" });
